@@ -1,4 +1,4 @@
-import { X2D, SPEEDS, MATERIALS, defaultSpools, compatible, reachable, coreXY, grams, duration, traveled, slotLabel, area } from './spec.js';
+import { X2D, SPEEDS, MATERIALS, defaultSpools, compatible, reachable, coreXY, coolingTargets, grams, duration, traveled, slotLabel, area } from './spec.js';
 import { validateMapping } from './gcode.js';
 
 const ROOM = 23;
@@ -20,7 +20,7 @@ export class VirtualPrinter {
     this.state = {
       power: true, status: 'booting', message: 'Starting printer…', bootTime: 1.4, phase: '', tempo: 1,
       position: position(142, 80, 118), nozzle: 0, selector: 0, lights: config.lights ?? true,
-      door: false, lid: false, plate: true, homed: false, fan: 0, motionSpeed: 0,
+      door: false, lid: false, plate: true, homed: false, fan: 0, fanOverrides: { auxiliary: null, exhaust: null }, motionSpeed: 0,
       spools: defaultSpools().map((fallback, i) => ({ ...fallback, ...config.spools?.[i], rotation: 0 })),
       loaded: [null, null], feed: null, service: null, job: null, path: [],
       temperatures: Object.fromEntries(Object.keys(THERMAL).map(key => [key, { current: ROOM, target: 0 }])),
@@ -40,7 +40,7 @@ export class VirtualPrinter {
   telemetry() {
     const s = this.state;
     return { status: s.status, power: s.power, phase: s.phase, position: { ...s.position }, carriage: this.carriage,
-      belts: coreXY(this.carriage.x, this.carriage.y), temperatures: structuredClone(s.temperatures), fan: s.fan,
+      belts: coreXY(this.carriage.x, this.carriage.y), temperatures: structuredClone(s.temperatures), fan: s.fan, fans: coolingTargets(s),
       nozzle: s.nozzle, loaded: [...s.loaded], spools: structuredClone(s.spools), dryer: { ...s.dryer },
       job: s.job ? { name: s.job.file.name, layer: s.job.layer, layers: s.job.file.layers, progress: this.progress,
         elapsed: s.job.elapsed, remaining: Math.max(0, s.job.estimate - s.job.elapsed) } : null };
@@ -100,9 +100,12 @@ export class VirtualPrinter {
       throw new Error('The requested temperature is outside the supported range.');
     this.state.temperatures[zone].target = target;
   }
-  setFan(percent) {
+  setFan(percent, channel = 1) {
     this.#requirePower();
-    this.state.fan = Math.max(0, Math.min(100, Number(percent) || 0));
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    if (channel === 1 || channel === 0) this.state.fan = value;
+    if (channel === 2) this.state.fanOverrides.auxiliary = value;
+    if (channel === 3) this.state.fanOverrides.exhaust = value;
   }
   home() {
     this.#requireIdle();
@@ -315,6 +318,8 @@ export class VirtualPrinter {
   }
   #cool() {
     for (const temperature of Object.values(this.state.temperatures)) temperature.target = 0;
+    this.state.fan = 0;
+    this.state.fanOverrides = { auxiliary: null, exhaust: null };
   }
   #thermal(dt) {
     const s = this.state;
@@ -359,6 +364,14 @@ export class VirtualPrinter {
       const atTrigger = { ...task.to, x: task.to.x + (s.selector - task.fromNozzle) * X2D.rightTipOffset * 0.45 };
       s.position = out ? blend(atTrigger, destination, out) : blend(task.from, atTrigger, reached);
       s.motionSpeed = f < 0.35 || f > 0.69 ? 90 : 0;
+    } else if (task.wipe) {
+      const depth = Math.max(15, task.from.z);
+      const near = position(25, 236, depth), far = position(43, 236, depth);
+      const stations = [task.from, { ...task.from, z: depth }, near, far, near, far, task.to];
+      const travel = Math.min(f * (stations.length - 1), stations.length - 1.000001);
+      const index = Math.floor(travel);
+      s.position = blend(stations[index], stations[index + 1], travel - index);
+      s.motionSpeed = 42;
     } else if (task.probe) {
       const points = [task.from, position(34, 32, 1), position(221, 35, 0.3), position(220, 219, 1),
         position(34, 220, 0.3), position(128, 128, 1), task.to];
@@ -415,7 +428,15 @@ export class VirtualPrinter {
     }
     if (phase === 'Homing') this.#service(phase, X2D.stageSeconds[phase], { from: { ...s.position }, to: this.#leftEdge(HOME) });
     if (phase === 'Bed leveling') this.#service(phase, X2D.stageSeconds[phase], { from: { ...s.position }, to: this.#leftEdge(HOME), probe: true });
-    if (phase === 'Flow calibration' || phase === 'Nozzle cleaning')
+    if (phase === 'Nozzle cleaning') {
+      const nozzle = job.firstSlot === 4 ? 1 : 0;
+      if (s.nozzle !== nozzle) {
+        this.#switch(nozzle, () => {});
+        return;
+      }
+      this.#service(phase, X2D.stageSeconds[phase], { from: { ...s.position }, to: this.#leftEdge(PARK), wipe: true });
+    }
+    if (phase === 'Flow calibration')
       this.#service(phase, X2D.stageSeconds[phase], { from: { ...s.position }, to: this.#leftEdge(PARK) });
     if (phase === 'Loading filament') this.#feed(job.firstSlot);
     job.prep.shift();
@@ -527,8 +548,8 @@ export class VirtualPrinter {
     const s = this.state, { code, args } = entry;
     if (code === 'G4') s.job.wait = Math.max(0, Math.min(600, args.S ?? (args.P || 0) / 1000));
     if (['M0', 'M1', 'M25', 'M400'].includes(code)) this.pause('Print paused by the file');
-    if (code === 'M106') this.setFan((args.S ?? 255) / 255 * 100);
-    if (code === 'M107') this.setFan(0);
+    if (code === 'M106') this.setFan((args.S ?? 255) / 255 * 100, args.P ?? 1);
+    if (code === 'M107') this.setFan(0, args.P ?? 1);
     const channel = { M104: zone, M109: zone, M140: 'bed', M190: 'bed', M141: 'chamber', M191: 'chamber' }[code];
     if (channel && (args.S !== undefined || args.R !== undefined)) {
       const target = Math.max(0, Math.min(X2D.temperatures[channel], args.S ?? args.R));

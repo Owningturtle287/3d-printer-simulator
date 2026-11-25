@@ -14,6 +14,8 @@ test('desktop physical touchscreen controls temperature, opens Benchy, and exits
   await expect(page.getByRole('heading', { name: 'Printer', exact: true })).toBeVisible();
   await expect(page.locator('.status-pill')).toHaveText('Ready', { timeout: 15000 });
   await expect(page.locator('.world')).toBeVisible();
+  await expect(page.locator('html')).toHaveCSS('color-scheme', 'light');
+  await expect(page.locator('.inspector')).toHaveCSS('background-color', 'rgb(255, 255, 255)');
   const touchscreen = page.getByRole('region', { name: 'Printer touchscreen' });
   const before = await touchscreen.boundingBox();
   await touchscreen.click();

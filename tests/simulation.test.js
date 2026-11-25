@@ -1,9 +1,11 @@
+import { CHAIN_LENGTH, dragChainPose } from '../src/carriage-harness.js';
+import { GANTRY_Y, HEAD_Y, nozzleDatums } from '../src/toolhead.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { VirtualPrinter } from '../src/printer.js';
-import { reachable, coreXY, carriageFor, grams, X2D } from '../src/spec.js';
+import { reachable, coreXY, carriageFor, grams, X2D, coolingTargets } from '../src/spec.js';
 import { parseGcode, validateMapping } from '../src/gcode.js';
 import { demoGcode } from '../src/demos.js';
 import { loadPreferences, savePreferences } from '../src/storage.js';
@@ -220,4 +222,49 @@ test('the complete Benchy and dual-nozzle demo run from job preparation to cooli
     assert.equal(p.state.history.length, 1);
     if (mapping[1] === 4) assert.ok(p.state.path.some(bead => bead.color === p.state.spools[4].color));
   }
+});
+
+test('the active nozzle stays at the commanded separation from the plate during selection', () => {
+  const z = 0.24;
+  const left = nozzleDatums(0, z), middle = nozzleDatums(0.5, z), right = nozzleDatums(1, z);
+  assert.equal(left.left, middle.left);
+  assert.equal(left.left, right.left);
+  assert.ok(left.right > middle.right && middle.right > right.right);
+  assert.ok(Math.abs(GANTRY_Y + HEAD_Y + left.left - left.plate - z) < 1e-8);
+  assert.ok(Math.abs(GANTRY_Y + HEAD_Y + right.right - right.plate - z) < 1e-8);
+});
+
+test('the drag chain retains its fixed mount and bend radius over full carriage travel', () => {
+  const fixed = dragChainPose(0, CHAIN_LENGTH);
+  for (const x of [-128, -45, 0, 31, 128]) {
+    assert.equal(dragChainPose(x, 0).x, x);
+    assert.deepEqual(dragChainPose(x, CHAIN_LENGTH), fixed);
+    let previous = dragChainPose(x, 0);
+    for (let i = 1; i <= 250; i++) {
+      const next = dragChainPose(x, i * CHAIN_LENGTH / 250);
+      assert.ok(Math.hypot(next.x - previous.x, next.y - previous.y) <= CHAIN_LENGTH / 250 + 1e-8);
+      assert.ok(next.x > -151 && next.x < 161);
+      previous = next;
+    }
+  }
+});
+
+test('the part, auxiliary, exhaust and temperature-driven fans react independently', () => {
+  const p = boot();
+  assert.ok(Object.values(coolingTargets(p.state)).every(rpm => rpm === 0));
+  p.setTemperature('right', 175);
+  tick(p, 10);
+  assert.equal(coolingTargets(p.state).left, 0);
+  assert.ok(coolingTargets(p.state).right > 0);
+  p.setTempo(100);
+  const job = code(['G0 X60 Y60 Z0.2','G1 X90 E1 F1000','M106 P1 S64','M106 P2 S255','M106 P3 S255',
+    'M107 P2','G4 S45','G1 Y95 E1']);
+  p.start(job, { 0: 0 }, { calibrate: false });
+  until(p, () => p.state.job.wait > 0);
+  const speeds = p.telemetry().fans;
+  assert.ok(Math.abs(speeds.part - 7100 * 64 / 255) < 1e-8);
+  assert.equal(speeds.auxiliary, 0);
+  assert.equal(speeds.exhaust, 2550);
+  p.power();
+  assert.ok(Object.values(p.telemetry().fans).every(rpm => rpm === 0));
 });

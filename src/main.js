@@ -166,7 +166,7 @@ function sectionTitle(name, body, extra = '') {
 function renderScreen() {
   const body = $('.screen-body');
   if (state.status === 'off' || state.status === 'booting') {
-    body.innerHTML = `<div class="touch-boot">${icon('layers')}<strong>X2D Print Lab</strong><span>${state.status === 'off' ? 'Printer powered off' : 'Starting printer…'}</span>
+    body.innerHTML = `<div class="touch-boot${state.status === 'off' ? ' powered-off' : ''}">${icon('layers')}<strong>X2D Print Lab</strong><span>${state.status === 'off' ? 'Printer powered off' : 'Starting printer…'}</span>
       ${state.status === 'off' ? button('Power on', 'power', 'power', 'touch-strong') : '<div class="boot-line"></div>'}</div>`;
     return;
   }
@@ -186,7 +186,9 @@ function renderScreen() {
       ${button('Nozzle &amp; extruder', 'page:nozzles', 'spool')}</div>
     ${thermalPage ? tempForm() : moveForm()}
     <div class="touch-row">${button('Chamber light', 'lamp', 'light')}${button('Camera', 'view:camera', 'lens')}
-      <label class="inline-label">Part fan <input data-change="fan" type="range" min="0" max="100" value="${state.fan}" aria-label="Part fan speed"></label></div>`);
+    </div><div class="touch-fan-controls">${[['Part fan', 1, state.fan], ['Auxiliary fan', 2, state.fanOverrides.auxiliary],
+      ['Chamber exhaust', 3, state.fanOverrides.exhaust]].map(([name, channel, value]) =>
+      `<label>${name}<input data-change="fan" data-fan="${channel}" type="range" min="0" max="100" value="${value ?? 0}" aria-label="${name} speed"></label>`).join('')}</div>`);
   if (page === 'nozzles') content = sectionTitle('Nozzle &amp; extruder', `
     <div class="touch-row">${button('Left · Direct drive', 'nozzle:0', 'check', state.nozzle === 0 ? 'touch-strong' : '')}
       ${button('Right · Auxiliary', 'nozzle:1', 'check', state.nozzle === 1 ? 'touch-strong' : '')}</div>
@@ -266,7 +268,7 @@ function paintPreview() {
     return;
   }
   const ctx = canvas.getContext('2d'), width = canvas.width, height = canvas.height;
-  ctx.fillStyle = '#1c2627'; ctx.fillRect(0, 0, width, height);
+  ctx.fillStyle = '#edf3ef'; ctx.fillRect(0, 0, width, height);
   const b = job.bounds;
   const center = { x: (b.x[0] + b.x[1]) / 2, y: (b.y[0] + b.y[1]) / 2, z: (b.z[0] + b.z[1]) / 2 };
   const factor = 155 / Math.max(b.x[1] - b.x[0], b.y[1] - b.y[0], b.z[1] - b.z[0], 1);
@@ -493,7 +495,7 @@ document.addEventListener('change', event => {
   try {
     if (change === 'view') setView(input.value);
     if (change === 'tempo') { printer.setTempo(Number(input.value)); prefs(); }
-    if (change === 'fan') printer.setFan(input.value);
+    if (change === 'fan') printer.setFan(input.value, Number(input.dataset.fan));
     if (change === 'quality') { quality = input.value; view?.setQuality(quality); prefs(); }
     if (change === 'fault' && input.value) { printer.injectFailure(input.value); dialog.close(); }
     if (change === 'plate-job') { batchIndex = Number(input.value); configureMapping(); renderScreen(); }

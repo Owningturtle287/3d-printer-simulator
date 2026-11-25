@@ -1,132 +1,19 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { X2D } from './spec.js';
-
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
-const metal = (color, roughness = 0.53, metalness = 0.45) => new THREE.MeshStandardMaterial({ color, roughness, metalness });
-const plastic = metal(0x242a2f, 0.6, 0.12);
-const body = metal(0x42474c, 0.48, 0.48);
-const edge = metal(0x262a2d, 0.6, 0.18);
-const rubber = metal(0x0b0e10, 0.85, 0.05);
-const ebon = metal(0x14181b, 0.51, 0.18);
-const steel = metal(0xa3acb1, 0.34, 0.86);
-const zinc = metal(0x757b7a, 0.48, 0.75);
-const amber = metal(0xe8ad50, 0.37, 0.56);
-const gasket = metal(0x121419, 0.72, 0.05);
-const glass = new THREE.MeshPhysicalMaterial({ color: 0x718083, metalness: 0.29, roughness: 0.11, clearcoat: 0.85,
-  transparent: true, opacity: 0.33, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 0.7 });
-const tinted = glass.clone(); tinted.color.set(0x5e6565); tinted.opacity = 0.37;
-const tubeMaterial = new THREE.MeshPhysicalMaterial({ color: 0xb9c7ca, transparent: true, opacity: 0.48,
-  depthWrite: false, roughness: 0.31, metalness: 0.12 });
-const lens = new THREE.MeshPhysicalMaterial({color: 0x172c41, roughness: 0.1, metalness: 0.7, clearcoat: 1});
-const boxCache = new Map();
-const cylinderCache = new Map();
-
-function add(parent, geometry, mat, x, y, z) {
-  const mesh = new THREE.Mesh(geometry, mat);
-  mesh.position.set(x, y, z);
-  mesh.castShadow = !mat.transparent;
-  mesh.receiveShadow = true;
-  parent.add(mesh);
-  return mesh;
-}
-function box(parent, w, h, d, x, y, z, mat, radius = 0) {
-  const key = [w, h, d, radius].join(':');
-  if (!boxCache.has(key)) boxCache.set(key, radius ? new RoundedBoxGeometry(w, h, d, 2, Math.min(radius, w / 2, h / 2, d / 2)) : new THREE.BoxGeometry(w, h, d));
-  return add(parent, boxCache.get(key), mat, x, y, z);
-}
-function cy(parent, top, bottom, h, x, y, z, mat, axis = 'y', segments = 28) {
-  const key = [top, bottom, h, segments].join(':');
-  if (!cylinderCache.has(key)) cylinderCache.set(key, new THREE.CylinderGeometry(top, bottom, h, segments));
-  const mesh = add(parent, cylinderCache.get(key), mat, x, y, z);
-  if (axis === 'x') mesh.rotation.z = -Math.PI / 2;
-  if (axis === 'z') mesh.rotation.x = Math.PI / 2;
-  return mesh;
-}
-function group(parent, x = 0, y = 0, z = 0) {
-  const node = new THREE.Group();
-  node.position.set(x, y, z);
-  parent.add(node);
-  return node;
-}
-function mark(node, action) { node.userData.action = action; return node; }
-
-function grain(pepper = false) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 256;
-  const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(256, 256);
-  let seed = 991;
-  const rnd = () => { seed = Math.imul(1664525, seed) + 1013904223 | 0; return (seed >>> 0) / 2 ** 32; };
-  for (let i = 0; i < pixels.data.length; i += 4) {
-    const value = 205 + Math.floor(rnd() * 47) - (pepper && rnd() > 0.96 ? 62 : 0);
-    pixels.data.set([value, value, value, 255], i);
-  }
-  ctx.putImageData(pixels, 0, 0);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3); texture.anisotropy = 4;
-  return texture;
-}
-function label(parent, text, width, height, x, y, z, options = {}) {
-  const { color = '#c5cbcc', size = 32, side = 'front', weight = 600, background, align = 'center' } = options;
-  const canvas = document.createElement('canvas');
-  canvas.width = 768; canvas.height = Math.ceil(768 * height / width);
-  const ctx = canvas.getContext('2d');
-  if (background) { ctx.fillStyle = background; ctx.fillRect(0, 0, canvas.width, canvas.height); }
-  ctx.fillStyle = color; ctx.textBaseline = 'middle'; ctx.textAlign = align;
-  ctx.font = `${weight} ${Math.round(size * canvas.height / 48)}px Arial, sans-serif`;
-  ctx.fillText(text, align === 'left' ? 20 : canvas.width / 2, canvas.height / 2, canvas.width - 20);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
-  const mesh = add(parent, new THREE.PlaneGeometry(width, height),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, toneMapped: false }), x, y, z);
-  if (side === 'rear') mesh.rotation.y = Math.PI;
-  if (side === 'right') mesh.rotation.y = Math.PI / 2;
-  if (side === 'left') mesh.rotation.y = -Math.PI / 2;
-  if (side === 'top') mesh.rotation.x = -Math.PI / 2;
-  mesh.castShadow = false;
-  return mesh;
-}
-function screw(parent, x, y, z, face = 'z') {
-  const holder = group(parent, x, y, z);
-  if (face === 'rear') holder.rotation.y = Math.PI;
-  if (face === 'right') holder.rotation.y = Math.PI / 2;
-  if (face === 'left') holder.rotation.y = -Math.PI / 2;
-  const mesh = cy(holder, 2.6, 2.6, 1.3, 0, 0, 0, zinc, 'z', 10);
-  mesh.castShadow = false;
-  box(holder, 2.5, 0.55, 0.2, 0, 0, 0.7, ebon).rotation.z = 0.7;
-}
-function tube(parent, points, radius, mat = tubeMaterial, segments = 32) {
-  const curve = new THREE.CatmullRomCurve3(points);
-  const mesh = add(parent, new THREE.TubeGeometry(curve, segments, radius, 8, false), mat, 0, 0, 0);
-  return { mesh, curve };
-}
-function fan(parent, radius, x, y, z, face = 'front', grilles = true) {
-  const outer = group(parent, x, y, z);
-  if (face === 'rear') outer.rotation.y = Math.PI;
-  if (face === 'right') outer.rotation.y = Math.PI / 2;
-  if (face === 'left') outer.rotation.y = -Math.PI / 2;
-  cy(outer, radius + 3, radius + 3, 5, 0, 0, 0, rubber, 'z');
-  const blades = group(outer, 0, 0, 3);
-  for (let i = 0; i < 9; i++) {
-    const blade = group(blades);
-    blade.rotation.z = i * Math.PI * 2 / 9;
-    box(blade, radius * 0.54, radius * 0.33, 1.4, radius * 0.52, 0, 0, zinc, 1.9).rotation.z = 0.48;
-  }
-  cy(outer, radius * 0.28, radius * 0.29, 5, 0, 0, 5, plastic, 'z');
-  for (const k of grilles ? [0.52, 0.72, 0.89, 1.02] : [0.95, 1.07]) {
-    add(outer, new THREE.TorusGeometry(radius * k, 0.75, 6, 44), edge, 0, 0, 7);
-  }
-  return blades;
-}
+import { X2D, coreXY, coolingTargets } from './spec.js';
+import { V, metal, plastic, body, edge, rubber, ebon, steel, zinc, amber, gasket, glass, tinted,
+  add, box, cy, group, mark, grain, label, screw, tube } from './model-parts.js';
+import { makeAxialFan, animateFan } from './fans.js';
+import { makeToolhead, animateToolhead, plateHeight, GANTRY_Y } from './toolhead.js';
+import { makeCarriageHarness, animateCarriageHarness, makeTimingBelt, makeBeltPulley } from './carriage-harness.js';
+import { makeChamber, animateChamber } from './chamber.js';
 
 export function makePrinter(scene) {
   const root = group(scene), exterior = group(root);
   const shell = body.clone();
   shell.map = grain();
   shell.bumpMap = shell.map; shell.bumpScale = 0.19;
-  const pei = metal(0x30261d, 0.85, 0.33);
-  pei.map = grain(true); pei.bumpMap = pei.map; pei.bumpScale = 0.23;
+  const pei = metal(0x3c3023, 0.79, 0.39);
+  pei.map = grain(true); pei.bumpMap = pei.map; pei.bumpScale = 0.25;
 
   // Front is +Z. The chassis outer envelope is 392 × 406 × 478 mm.
   const [width, depth] = X2D.chassis;
@@ -178,7 +65,7 @@ export function makePrinter(scene) {
     for (const y of [54, 123, 195, 274, 340, 400]) screw(rear, x - (x > 0 ? 4 : -4), y, -4, 'rear');
   }
   for (const [x, y] of [[0, 66], [110, 392], [-87, 387], [-53, 279], [-48, 177]]) screw(rear, x, y, -4, 'rear');
-  const rearFan = fan(rear, 43, 16, 192, -13, 'rear');
+  const rearFan = makeAxialFan(rear, 42, 16, 192, -15, { angle: Math.PI, blades: 7 });
   for (const x of [-51, 83]) box(rear, 6, 103, 10, x, 198, -6, plastic, 2);
   for (const y of [145, 251]) box(rear, 139, 6, 10, 16, y, -6, plastic, 2);
   for (let i = 0; i < 14; i++) box(rear, 1.1, 88, 4, -25 + i * 6.3, 192, -26, zinc, 0.4);
@@ -247,31 +134,25 @@ export function makePrinter(scene) {
   const display = box(screen, 112.5, 63.3, 0.4, 0, 0, 8.7, new THREE.MeshBasicMaterial({ color: 0x0d1110 }), 1.3);
   label(screen, '•', 6, 4, 55, -33, 9, { color: '#72e89a', size: 27 });
 
-  // Z screws and guides are anchored to the chamber; the plate travels with the simulated layer height.
-  for (const [x, z] of [[-149, 143], [149, 143], [0, -143]]) {
-    cy(root, 4.2, 4.2, 342, x, 226, z, zinc);
+  const chamber = makeChamber(root);
+  // The threaded shafts rotate in their end bearings. Nut carriers translate with the bed.
+  const shaftCenters = [[-151,139],[151,139],[0,-145]];
+  const zScrews = shaftCenters.map(([x,z], i) => {
+    const screwRotor = group(root, x, 0, z);
+    cy(screwRotor, 4.0, 4.0, 342, 0, 225, 0, zinc);
     const coil = [];
-    for (let i = 0; i <= 410; i++) {
-      const a = i * Math.PI / 7;
-      coil.push(V(x + Math.cos(a) * 4.5, 57 + i * 0.81, z + Math.sin(a) * 4.5));
+    for (let k = 0; k <= 560; k++) {
+      const y = 55 + k * .59, angle = (y - 55) * Math.PI / 4;
+      coil.push(V(Math.cos(angle)*4.45, y, Math.sin(angle)*4.45));
     }
-    tube(root, coil, 0.65, steel, 395);
-    cy(root, 5, 5, 325, x + (x < 0 ? 12 : -12), 227, z, steel);
-    box(root, 25, 12, 27, x, 59, z, ebon, 2);
-  }
-  box(root, 81, 276, 18, -111, 221, -170, plastic, 4);
-  label(root, 'Bambu Lab', 56, 12, -110, 327, -159, { color: '#858e8d' });
-  for (let j = 0; j < 17; j++) box(root, 52, 2.4, 2, -112, 121 + j * 9, -159.8, rubber, 0.7);
-  box(root, 65, 221, 12, 109, 237, -170, plastic, 2);
-  for (let i = 0; i < 16; i++) box(root, 2.5, 186, 2, 82 + i * 3.4, 238, -162.8, rubber, 0.7);
-  const cam = group(root, -151, 389, 152);
-  box(cam, 26, 16, 20, 0, 0, 0, plastic, 3);
-  cy(cam, 5.1, 5.1, 3, 1, -1, 11, lens, 'z');
-  cy(cam, 2.3, 2.3, 3.4, 1, -1, 11.2, steel, 'z');
-  box(root, 35, 12, 40, -123, 392, -147, ebon, 2);
-  for (let n = 0; n < 9; n++) box(root, 2, 3, 20, -134 + n * 2.5, 398, -150, zinc, 0.4);
-  box(root, 26, 7, 31, 135, 397, -135, rubber, 1.5);
-  box(root, 18, 5, 16, 135, 401, -135, steel, 1);
+    tube(screwRotor, coil, .60, steel, 485);
+    const guideX = x + (i === 2 ? 14 : -Math.sign(x) * 13);
+    cy(root, 5.2, 5.2, 325, guideX, 224, z, steel);
+    box(root, 30, 9, 27, x, 53, z, ebon, 1.9);
+    cy(root, 7.2, 7.2, 6.4, x, 59, z, zinc);
+    cy(root, 6.9, 6.9, 8.4, x, 389, z, ebon);
+    return screwRotor;
+  });
 
   const bed = group(root, 0, 268, 0);
   box(bed, 283, 8, 277, 0, -6, -4, zinc, 3);
@@ -283,51 +164,37 @@ export function makePrinter(scene) {
   label(plate, 'Bambu Textured PEI Plate', 113, 9, -61, 0.08, 119, { side: 'top', color: '#ad9571', size: 31 });
   label(plate, 'HOT SURFACE', 49, 6, 96, 0.08, 120, { side: 'top', color: '#bd9c64', size: 31 });
 
-  for (const x of [-155, 155]) {
-    cy(root, 4.2, 4.2, 312, x, 410, 0, steel, 'z');
-    for (const z of [-151, 151]) {
-      cy(root, 9, 9, 9, x, 411, z, zinc);
-      cy(root, 3.4, 3.4, 11, x, 411, z, steel);
-      box(root, 30, 20, 26, x, 397, z, plastic, 3);
+  for (const [x,z] of shaftCenters) {
+    box(bed, 20.6, 12.1, 19.8, x, -10.6, z, ebon, 2.25);
+    cy(bed, 7.65, 7.65, 4.0, x, -5.7, z, zinc);
+    box(bed, 28.5, 4, 15.5, x - Math.sign(x)*9, -10.6, z, zinc, 1.05);
+  }
+  const axisMotion = { side: [], cross: [], pulleys: [] };
+  for (const side of [-1, 1]) {
+    const x = side * 155;
+    cy(root, 4.7, 4.7, 307, x, 407.2, 0, steel, 'z', 40);
+    cy(root, 2.8, 2.8, 302, x - side*5.8, 376.4, -2, zinc, 'z', 22);
+    for (const z of [-149, 148]) {
+      const mount = group(root, x, 0, z);
+      box(mount, 29, 37, 26, 0, 388, 0, ebon, 3);
+      box(mount, 26.0, 9.7, 22, 0, 407.5, 0, zinc, 1.4);
+      axisMotion.pulleys.push({ rotor: makeBeltPulley(mount, side*5.5, 394, 0), side });
     }
-    for (const j of [0, 1]) box(root, 3.8, 1.6, 294, x + j * 6.5, 413 + j * 3.3, 0, rubber, 0.5);
+    axisMotion.side.push(makeTimingBelt(root, 292, x + side*3, 394, 0, true));
   }
 
-  const gantry = group(root, 0, 405, 0);
-  cy(gantry, 5, 5, 311, 0, 0, 0, steel, 'x');
-  cy(gantry, 4.2, 4.2, 307, 0, -12, 1, zinc, 'x');
-  for (const y of [-3, 6]) box(gantry, 306, 2.2, 3.8, 0, y, -8, rubber, 0.5);
-  for (const x of [-155, 155]) box(gantry, 22, 24, 35, x, -1, 0, plastic, 3);
-  const head = mark(group(gantry, 0, -9, 0), 'head');
-  const cover = group(head);
-  box(cover, 65, 63, 42, 10.25, -14, 12, plastic, 7);
-  box(cover, 59, 51, 8, 10.25, -11, 33, edge, 5);
-  const headFan = fan(cover, 16.5, 9, -13, 37, 'front', false);
-  for (const x of [-16, 35]) for (const y of [-30, 4]) screw(cover, x, y, 37.1);
-  for (let i = 0; i < 8; i++) box(cover, 0.55, 1.1, 7, 41.9, -24 + i * 2.2, 15, rubber, 0.3);
-  box(cover, 43, 6, 2, 10, -43, 33.5, ebon, 1.8);
-  cy(cover, 3, 3, 2, 31, -38, 38, lens, 'z');
-  const hotends = [0, X2D.rightTipOffset].map(x => {
-    const node = group(head, x, -44, 0);
-    box(node, 14, 13, 14, 0, 2, 0, ebon, 2);
-    for (const y of [4, 7, 10, 13]) box(node, 16, 1.25, 12, 0, y, 0, zinc, 0.5);
-    box(node, 9, 5, 7, 0, -4, 0, zinc, 0.6);
-    cy(node, 3, 0.85, 4, 0, -7, 0, amber, 'y', 10);
-    box(node, 5, 1.1, 1.1, 0, -3, 4, amber, 0.2);
-    return node;
-  });
-  const blocker = group(head, 0, -54, -4);
-  box(blocker, 12, 2, 11, 0, 0, 0, ebon, 1);
-  box(blocker, 23, 2, 3, 8, 1.5, -8, zinc, 0.5);
-  box(head, 18, 2.6, 9, 35, -39, -5, steel, 1);
-  for (const x of [0, X2D.rightTipOffset]) cy(head, 5.5, 5.5, 8, x, 19, 0, zinc);
-
-  const light = new THREE.SpotLight(0xe9f6f5, 13400, 550, 1.15, 0.68, 1.35);
-  light.position.set(-105, 402, 155);
-  light.target.position.set(15, 166, -40);
-  root.add(light, light.target);
-  const lampMat = new THREE.MeshBasicMaterial({ color: 0xd5f8e9 });
-  box(root, 192, 3, 5, -48, 405, 146, lampMat, 1);
+  const gantry = group(root, 0, GANTRY_Y, 0);
+  cy(gantry, 4.85, 4.85, 311, 0, 4.2, 0, steel, 'x', 42);
+  cy(gantry, 4.4, 4.4, 311, 0, -35.2, -2.45, steel, 'x', 42);
+  axisMotion.cross.push(makeTimingBelt(gantry, 303, 0, -8.2, -6.4),
+    makeTimingBelt(gantry, 303, 0, -25, -7.2));
+  for (const x of [-155, 155]) {
+    box(gantry, 22.8, 45.2, 30.8, x, -14.7, -3.3, plastic, 2.7);
+    for (const y of [4.2, -35.2]) cy(gantry, 6.9, 6.9, 10.4, x - Math.sign(x)*8.7, y, y === 4.2 ? 0 : -2.45, zinc, 'x', 25);
+    for (const z of [-11.2, 7.8]) box(gantry, 15.1, 10.6, 3.4, x, 6.75, z, ebon, .72);
+  }
+  const hardware = makeToolhead(gantry);
+  const head = hardware.root;
 
   const ams = mark(group(root, 0, 478, -5), 'ams');
   box(ams, 366, 11, 259, 0, 6, 0, rubber, 5);
@@ -400,27 +267,14 @@ export function makePrinter(scene) {
   const extFeed = [V(242, 366, -165), V(235, 378, -220), V(185, 367, -257), V(116, 279, -259), V(91, 263, -214)];
   const midMain = [V(91, 287, -214), V(52, 312, -246), V(-18, 404, -247), V(-133, 381, -220), V(-132, 434, -160)];
   const midAux = [V(91, 263, -214), V(14, 279, -265), V(-76, 338, -251), V(-117, 365, -220), V(-119, 433, -160)];
-  for (const points of [mainFeed, extFeed, midMain, midAux]) tube(root, points, 2.35);
+  const routes = [[mainFeed, midMain], [extFeed, midAux]].map(sections => sections.map(points =>
+    ({ curve: tube(root, points, 2.35).curve, geometryEnd: points.at(-1) })));
   tube(root, [V(50, 550, -130), V(79, 496, -204), V(65, 376, -236), V(19, 304, -215)], 2.3, rubber);
-  const dynamicTubeMaterial = tubeMaterial.clone();
-  const filamentLines = [0, 1].map(() => {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(66 * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xb9b8a5, transparent: true, opacity: 0.5 }));
-    line.frustumCulled = false;
-    root.add(line);
-    return line;
-  });
-  const flex = [0, 1].map(() => {
-    const mesh = add(root, new THREE.BufferGeometry(), dynamicTubeMaterial, 0, 0, 0);
-    mesh.frustumCulled = false;
-    return mesh;
-  });
+  const harness = makeCarriageHarness(root, gantry, hardware, routes);
   const deposited = group(bed);
-  return { root, exterior, panels, rear, bed, plate, gantry, head, cover, hotends, blocker, light, lampMat,
-    frontGlass, powerLight, door, screen, display, lid, ams, spoolMount, spools, ledMats, deposited,
-    fans: [rearFan, headFan], paths: [mainFeed.concat(midMain.slice(1)), extFeed.concat(midAux.slice(1))],
-    filamentLines, flex };
+  return { root, panels, bed, plate, gantry, head, hardware, chamber, harness, axisMotion, zScrews, rearFan,
+    frontGlass, powerLight, door, screen, display, lid, spools, ledMats, deposited };
+
 }
 
 function makeSpool(parent, radius, width) {
@@ -458,24 +312,29 @@ function makeSpool(parent, radius, width) {
   return { parent, rotor, winding };
 }
 
-export function animatePrinter(model, state, carriage, dt, inspection, quality) {
+export function animatePrinter(model, state, carriage, dt, inspection, quality, clearFront = false) {
   model.door.rotation.y = THREE.MathUtils.damp(model.door.rotation.y, state.door ? -1.68 : 0, 8, dt);
   model.lid.rotation.x = THREE.MathUtils.damp(model.lid.rotation.x, state.lid ? -1.55 : 0, 7, dt);
-  model.bed.position.y = 343 - state.position.z;
+  const bedY = plateHeight(state.selector, state.position.z);
+  model.bed.position.y = bedY;
+  model.zScrews.forEach(screw => { screw.rotation.y = (bedY - 343) * Math.PI / 4; });
   model.plate.visible = state.plate;
   model.gantry.position.z = 128 - carriage.y;
   model.head.position.x = carriage.x - 128;
-  model.hotends[0].position.y = -44 + 3.6 * state.selector;
-  model.hotends[1].position.y = -44 + X2D.rightLift * (1 - state.selector);
-  model.blocker.position.x = X2D.rightTipOffset * (1 - state.selector);
-  model.blocker.rotation.y = Math.sin(state.selector * Math.PI) * 0.65;
-  model.frontGlass.visible = !inspection;
+  const { a, b } = coreXY(carriage.x, carriage.y);
+  model.axisMotion.cross[0].move(a);
+  model.axisMotion.cross[1].move(-b);
+  model.axisMotion.side[0].move(-a);
+  model.axisMotion.side[1].move(b);
+  for (const {rotor, side} of model.axisMotion.pulleys) rotor.rotation.y = (side === -1 ? a : b) / 8;
+  model.frontGlass.visible = !inspection && !clearFront;
   model.panels.forEach(node => { node.visible = !inspection; });
-  model.cover.visible = !inspection;
-  model.light.intensity = state.power && state.lights ? 13400 : 0;
-  model.lampMat.color.set(state.power && state.lights ? 0xe8fff5 : 0x586367);
   model.powerLight.color.set(state.power ? 0x83f09a : 0x263e32);
-  model.fans.forEach((rotor, index) => { rotor.rotation.z += dt * (state.fan * (index + 1) * 0.24 + (state.power ? 0.7 : 0)); });
+  const targets = coolingTargets(state);
+  animateFan(model.rearFan, targets.exhaust, dt);
+  animateToolhead(model.hardware, state, dt, inspection, targets);
+  animateChamber(model.chamber, state, targets, dt);
+  animateCarriageHarness(model.harness, model.head.position.x, model.gantry.position.z, GANTRY_Y, state, quality);
   for (let i = 0; i < model.spools.length; i++) {
     const spool = state.spools[i], mesh = model.spools[i];
     mesh.parent.visible = spool.present;
@@ -484,34 +343,5 @@ export function animatePrinter(model, state, carriage, dt, inspection, quality) 
     mesh.winding.roughness = ['Gloss', 'Silk', 'Metallic'].includes(spool.finish) ? 0.3 : 0.65;
     if (i < 4) model.ledMats[i].color.set(!state.power || !spool.present ? 0x41494b :
       state.feed?.slot === i || state.loaded[0] === i ? 0x64f2a5 : state.dryer.time ? 0xf0b26a : 0x99a8a2);
-  }
-  const last = model.lastFeed;
-  const dynamic = !last || Math.abs(carriage.x - last.x) + Math.abs(carriage.y - last.y) > (quality === 'low' ? 12 : 5);
-  if (dynamic) model.lastFeed = { x: carriage.x, y: carriage.y };
-  for (let i = 0; i < 2; i++) {
-    const path = model.paths[i], start = path.at(-1);
-    const end = V(carriage.x - 128 + i * X2D.rightTipOffset, 417, 128 - carriage.y);
-    if (dynamic || !model.lineCurves) {
-      const points = [start, V(-77 + i * 14, 447, -118), V(end.x - 15, 457, end.z - 34), end];
-      const flexCurve = new THREE.CatmullRomCurve3(points);
-      model.flex[i].geometry.dispose();
-      model.flex[i].geometry = new THREE.TubeGeometry(flexCurve, quality === 'low' ? 10 : 22, 2.2, 6, false);
-      model.lineCurves ??= [];
-      model.lineCurves[i] = new THREE.CatmullRomCurve3([...path, ...points.slice(1)]);
-    }
-    const feed = state.feed?.nozzle === i ? state.feed : null;
-    const slot = feed?.slot ?? state.loaded[i];
-    const fraction = feed?.fraction ?? (slot === null ? 0 : 1);
-    const line = model.filamentLines[i];
-    line.visible = fraction > 0;
-    if (!line.visible) continue;
-    line.material.color.set(state.spools[slot].color);
-    line.material.opacity = 0.88;
-    const buffer = line.geometry.attributes.position;
-    for (let j = 0; j < buffer.count; j++) {
-      const p = model.lineCurves[i].getPoint(j / (buffer.count - 1) * fraction);
-      buffer.setXYZ(j, p.x, p.y, p.z);
-    }
-    buffer.needsUpdate = true;
   }
 }

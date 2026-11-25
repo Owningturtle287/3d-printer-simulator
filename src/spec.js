@@ -79,3 +79,19 @@ export function traveled(distance, speed, accel, elapsed) {
   if (elapsed >= total - ramp) return distance - 0.5 * accel * Math.max(0, total - elapsed) ** 2;
   return 0.5 * accel * ramp ** 2 + speed * (elapsed - ramp);
 }
+
+export function coolingTargets(state) {
+  if (!state.power) return { part: 0, auxiliary: 0, exhaust: 0, left: 0, right: 0, heater: 0 };
+  const ramp = (n, low, high) => Math.max(0, Math.min(1, (n - low) / (high - low)));
+  const temp = state.temperatures;
+  const heating = temp.chamber.target > 25;
+  const part = state.fan / 100;
+  return {
+    part: 7100 * part,
+    left: 5900 * ramp(temp.left.current, 44, 62),
+    right: 5900 * ramp(temp.right.current, 44, 62),
+    auxiliary: 3900 * ((state.fanOverrides.auxiliary ?? (heating ? 22 : part * 48)) / 100),
+    exhaust: 2550 * ((state.fanOverrides.exhaust ?? (heating ? 10 : 65 * ramp(temp.chamber.current, 29, 59))) / 100),
+    heater: heating ? 2900 : 0,
+  };
+}

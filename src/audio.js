@@ -1,3 +1,5 @@
+import { coolingTargets } from './spec.js';
+
 export function createAudio(printer) {
   let context, movement, moveGain, fan, fanGain, volume, enabled = false;
   const Audio = globalThis.AudioContext ?? globalThis.webkitAudioContext;
@@ -44,7 +46,10 @@ export function createAudio(printer) {
       const now = context.currentTime;
       movement.frequency.setTargetAtTime(53 + Math.min(750, motor * 2.6), now, 0.05);
       moveGain.gain.setTargetAtTime(s.power ? Math.min(0.095, motor * 0.0015) : 0, now, 0.05);
-      fanGain.gain.setTargetAtTime(s.power ? 0.02 + s.fan * 0.00095 : 0, now, 0.12);
+      const cooling = coolingTargets(s);
+      const air = cooling.part / 7100 + cooling.auxiliary / 7800 + cooling.exhaust / 7650 +
+        (cooling.left + cooling.right) / 26550 + cooling.heater / 14500;
+      fanGain.gain.setTargetAtTime(Math.min(.145, air * .095), now, .14);
     },
   };
 }
