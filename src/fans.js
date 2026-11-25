@@ -4,6 +4,9 @@ import { cy, group, hexScrew, metal, outline, profiled, ring, roundOpening, ebon
 const rotorMaterial = metal(0x353a3b, 0.46, 0.14);
 const rotorEdge = metal(0x4d5252, 0.38, 0.25);
 const frameMaterial = metal(0x242729, 0.66, 0.08);
+const blowerWheel = metal(0x151719, .68, .04);
+const blowerVanes = metal(0x212325, .52, .11);
+const blowerCap = metal(0x232526, .62, .07);
 const TAU = Math.PI * 2;
 
 function repeatedBlades(parent, geometry, blades, material) {
@@ -90,7 +93,7 @@ export function makeBlower(parent, radius, x, y, z) {
   ring(shroud, [[radius, -.5], [radius * 1.02, .42], [radius * 1.087, .8],
     [radius * 1.12, .1], [radius * 1.1, -2.3], [radius, -2.4], [radius, -.5]], frameMaterial);
   const rotor = group(shroud, 0, 0, -.75);
-  cy(rotor, radius * .985, radius * .985, .7, 0, 0, -3.95, rotorMaterial, 'z', 56);
+  cy(rotor, radius * .985, radius * .985, .7, 0, 0, -3.95, blowerWheel, 'z', 56);
   const blade = new THREE.Shape();
   blade.moveTo(radius * .63, -radius * .02);
   blade.quadraticCurveTo(radius * .82, radius * .03, radius * .965, radius * .11);
@@ -99,10 +102,10 @@ export function makeBlower(parent, radius, x, y, z) {
   blade.closePath();
   const vanes = new THREE.ExtrudeGeometry(blade, { depth: 3.8, bevelEnabled: false, curveSegments: 5 });
   vanes.translate(0, 0, -3.9);
-  repeatedBlades(rotor, vanes, 41, rotorEdge);
-  cy(rotor, radius * .646, radius * .675, 3.45, 0, 0, -1.2, rotorMaterial, 'z', 52);
-  cy(rotor, radius * .598, radius * .632, .68, 0, 0, .74, rotorEdge, 'z', 52);
-  ring(rotor, [[radius * .47, 1.08], [radius * .462, .98], [radius * .45, 1.08]], rotorMaterial);
+  repeatedBlades(rotor, vanes, 41, blowerVanes);
+  cy(rotor, radius * .646, radius * .675, 3.45, 0, 0, -1.2, blowerWheel, 'z', 52);
+  cy(rotor, radius * .598, radius * .632, .68, 0, 0, .74, blowerCap, 'z', 52);
+  ring(rotor, [[radius * .47, 1.08], [radius * .462, .98], [radius * .45, 1.08]], blowerWheel);
   cy(rotor, .9, 1.0, .19, 0, 0, 1.19, frameMaterial, 'z', 14);
   return { shroud, rotor, rpm: 0 };
 }

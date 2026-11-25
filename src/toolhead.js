@@ -32,7 +32,7 @@ export function makeToolhead(gantry) {
   const root = mark(group(gantry, 0, HEAD_Y, 0), 'head');
   const matte = mount.clone();
   matte.bumpMap = grain(); matte.bumpScale = .15;
-  const fascia = metal(0x4d5051, .55, .22);
+  const fascia = metal(0x46494b, .55, .19);
   fascia.bumpMap = matte.bumpMap; fascia.bumpScale = .09;
 
   const rearFrame = outline([[-20,-30], [-20,10], [-14,22], [36,22], [48,13], [48,-31],

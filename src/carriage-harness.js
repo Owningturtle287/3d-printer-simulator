@@ -32,7 +32,7 @@ export function makeTimingBelt(parent, length, x, y, z, alongY = false) {
   if (alongY) fixture.rotation.y = Math.PI / 2;
   box(fixture, length, 5.2, 1.34, 0, 0, -.18, rubber, .21);
   const teeth = new THREE.InstancedMesh(new THREE.BoxGeometry(1.04, 5.0, .85),
-    metal(0x333638, .76, .10), count);
+    metal(0x26282a, .76, .07), count);
   const matrix = new THREE.Matrix4();
   for (let i = 0; i < count; i++) teeth.setMatrixAt(i, matrix.makeTranslation(i * pitch - (count - 1) * pitch / 2, 0, .78));
   teeth.receiveShadow = true;
