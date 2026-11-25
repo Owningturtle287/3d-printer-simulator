@@ -63,7 +63,10 @@ function enterFocus(enter) {
   if (enter === focused) return;
   focused = enter;
   stage.classList.toggle('screen-view', enter);
-  surface.classList.toggle('fallback-focus', enter && renderingError);
+  if (renderingError) {
+    surface.classList.toggle('fallback-focus', enter);
+    surface.classList.toggle('focused', enter);
+  }
   view?.show(enter ? 'screen' : 'exit');
   if (enter) {
     if (renderingError) surface.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

@@ -59,3 +59,20 @@ test('iPhone-sized touch layout imports a file, runs a print, and reloads the ap
   await expect(page.getByText('small-line.gcode')).toBeVisible();
   await context.close();
 });
+
+test('touchscreen stays interactive when WebGL is disabled', async ({ page }) => {
+  await page.addInitScript(() => {
+    const getContext = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (type, ...args) {
+      return type.startsWith('webgl') ? null : getContext.call(this, type, ...args);
+    };
+  });
+  await page.goto('/');
+  await expect(page.locator('.status-pill')).toHaveText('Ready');
+  await page.getByRole('button', { name: 'Open printer controls' }).click();
+  const screen = page.getByRole('region', { name: 'Printer touchscreen' });
+  await screen.getByRole('button', { name: 'Controls' }).click();
+  await screen.getByRole('spinbutton', { name: 'Build plate target temperature' }).fill('65');
+  await screen.locator('form[data-zone="bed"]').getByRole('button', { name: 'Set' }).click();
+  await expect.poll(() => page.evaluate(() => window.x2d.getTelemetry().temperatures.bed.target)).toBe(65);
+});
