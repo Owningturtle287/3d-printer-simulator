@@ -23,6 +23,8 @@ npm run build
 npm run preview
 ```
 
+To exercise the desktop and iPhone-sized browser flows, build the app, run `npx playwright install chromium`, then run `npm run test:browser`.
+
 The build is a static progressive web app. iPhone uses Safari and Add to Home Screen, so the same output works across the three platforms without native compilation. Serve `dist/` over HTTPS for installation and offline use. The **Deploy X2D Print Lab** Actions workflow tests and publishes it to GitHub Pages. In **Settings → Pages**, the source must be **GitHub Actions**.
 
 ## What the simulator supports

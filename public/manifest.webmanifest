@@ -1,0 +1,15 @@
+{
+  "id": "./",
+  "name": "X2D Print Lab",
+  "short_name": "X2D Print Lab",
+  "description": "X2D Combo 3D printer simulator",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#14191b",
+  "theme_color": "#14191b",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
