@@ -6,6 +6,7 @@ const position = (x, y, z) => ({ x, y, z });
 const HOME = position(0, 256, 0);
 const PARK = position(8, 246, 12);
 const TRIGGER = position(244, 252, 6);
+const GRID = 1.5;
 const THERMAL = { left: [0.035, 0.045], right: [0.032, 0.045], bed: [0.016, 0.014], chamber: [0.008, 0.009] };
 const active = new Set(['preparing', 'printing', 'paused', 'fault']);
 const blend = (a, b, f) => position(a.x + (b.x - a.x) * f, a.y + (b.y - a.y) * f, a.z + (b.z - a.z) * f);
@@ -13,11 +14,12 @@ const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 
 export class VirtualPrinter {
   #listeners = new Set();
+  #surface = new Float32Array(173 * 173);
 
   constructor(config = {}) {
     this.state = {
       power: true, status: 'booting', message: 'Starting printer…', bootTime: 1.4, phase: '', tempo: 1,
-      position: position(128, 128, 118), nozzle: 0, selector: 0, lights: config.lights ?? true,
+      position: position(142, 80, 118), nozzle: 0, selector: 0, lights: config.lights ?? true,
       door: false, lid: false, plate: true, homed: false, fan: 0, motionSpeed: 0,
       spools: defaultSpools().map((fallback, i) => ({ ...fallback, ...config.spools?.[i], rotation: 0 })),
       loaded: [null, null], feed: null, service: null, job: null, path: [],
@@ -87,6 +89,7 @@ export class VirtualPrinter {
     if (this.busy || !s.door || s.temperatures.bed.current > 55)
       throw new Error('Wait for the bed to cool below 55 °C and open the door before removing the print.');
     s.path = [];
+    this.#surface.fill(0);
     if (s.status === 'complete') s.status = 'idle';
     s.job = null;
     this.#emit('clear');
@@ -262,7 +265,7 @@ export class VirtualPrinter {
     if (segment?.deposited) {
       const entry = file.entries[index], spool = s.spools[mapping[entry.tool]], to = resumeAt || s.position;
       const bead = { ...entry, to, color: spool.color, finish: spool.finish };
-      s.path.push(bead); this.#emit('extrude', bead);
+      s.path.push(bead); this.#trackSurface(bead.from, bead.to, true); this.#emit('extrude', bead);
     }
     s.job.segment = null; s.service = null; s.feed = null; s.selector = s.nozzle;
     s.status = 'idle'; s.phase = ''; s.message = reason; s.motionSpeed = 0;
@@ -280,7 +283,7 @@ export class VirtualPrinter {
   tick(seconds) {
     const s = this.state;
     if (seconds <= 0) return;
-    let budget = Math.min(seconds, 0.2) * s.tempo;
+    let budget = Math.min(seconds, 0.75) * s.tempo;
     while (budget > 1e-7) {
       const delta = Math.min(budget, 0.22);
       budget -= delta;
@@ -453,12 +456,17 @@ export class VirtualPrinter {
         const to = { ...entry.to };
         const from = { ...s.position };
         const distance = Math.max(dist(from, to), inPlace ? entry.extrusion : 1e-6);
+        if (!entry.extrusion && !entry.approach && this.#trackSurface(from, to, false)) {
+          this.#fault('Travel collision', 'The toolpath passes below deposited material. Cancel and re-slice with clearance.');
+          return;
+        }
         const rate = entry.extrusion > 0 ? Math.min(limits.printSpeed,
           entry.distance * (nozzle ? 12 : X2D.maxFlow) / Math.max(1e-6, entry.extrusion * area)) : X2D.travel;
         const vertical = Math.abs(to.z - from.z) / distance;
         const speed = Math.max(0.4, Math.min(entry.feed, inPlace ? 10 : rate, X2D.zSpeed / Math.max(vertical, 0.001)));
+        const requestedAcceleration = entry.extrusion > 0 ? entry.printAccel : entry.travelAccel;
         const acceleration = Math.min(entry.extrusion > 0 ? limits.acceleration : X2D.travelAcceleration,
-          X2D.zAcceleration / Math.max(vertical, 0.001));
+          requestedAcceleration || Infinity, X2D.zAcceleration / Math.max(vertical, 0.001));
         job.segment = { from, to, distance, speed, accel: acceleration, time: duration(distance, speed, acceleration),
           elapsed: 0, fraction: 0, deposited: false };
       }
@@ -484,11 +492,23 @@ export class VirtualPrinter {
           const spool = s.spools[slot];
           const bead = { from: entry.from, to: entry.to, width: entry.width, height: entry.height, color: spool.color, finish: spool.finish, layer: entry.layer };
           s.path.push(bead);
+          this.#trackSurface(bead.from, bead.to, true);
           this.#emit('extrude', bead);
         }
         job.index++; job.segment = null;
       }
     }
+  }
+  #trackSurface(from, to, deposit) {
+    const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / GRID));
+    for (let i = 0; i <= steps; i++) {
+      const p = blend(from, to, i / steps);
+      const index = Math.max(0, Math.floor(p.x / GRID)) + 173 * Math.max(0, Math.floor(p.y / GRID));
+      const height = this.#surface[index];
+      if (deposit) this.#surface[index] = Math.max(height, p.z);
+      else if (height > p.z + 0.32) return true;
+    }
+    return false;
   }
   #handleRunout(tool, slot) {
     const s = this.state, original = s.spools[slot];

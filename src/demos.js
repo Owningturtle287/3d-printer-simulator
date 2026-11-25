@@ -17,7 +17,9 @@ export async function loadDemo(id) {
   if (id === 'benchy') {
     const response = await fetch(new URL('./jobs/benchy.gcode.gz', location.href));
     if (!response.ok) throw new Error('The 3DBenchy toolpath could not be loaded.');
-    return parseGcode(strFromU8(gunzipSync(new Uint8Array(await response.arrayBuffer()))), { name: reference.name });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const toolpath = bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes;
+    return parseGcode(strFromU8(toolpath), { name: reference.name });
   }
   return parseGcode(demoGcode(id), { name: reference.name });
 }

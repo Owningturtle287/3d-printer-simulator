@@ -58,7 +58,7 @@ test('gear-and-trigger transition changes selector before committing to the righ
   tick(p, 3);
   assert.equal(p.state.nozzle, 1);
   assert.equal(p.state.selector, 1);
-  assert.equal(p.carriage.x, 107.5);
+  assert.equal(p.carriage.x, 121.5);
   p.home();
   tick(p, 5);
   assert.equal(p.carriage.x, 0);
@@ -196,4 +196,28 @@ test('preferences round-trip and the camera faces the physical display at mobile
   assert.deepEqual(narrow.target.toArray(), at.toArray());
   assert.ok(narrow.position.y > at.y);
   assert.ok(narrow.position.distanceTo(at) > wide.position.distanceTo(at));
+});
+
+test('low travel through a previously deposited high layer pauses with a collision', () => {
+  const p = boot();
+  p.setTempo(100);
+  const job = code(['G0 X60 Y60 Z1', 'G1 X90 E2 F1200', 'G0 X75 Y60 Z.2', 'G1 Y90 E1']);
+  p.start(job, { 0: 0 }, { calibrate: false });
+  until(p, () => p.state.status === 'fault');
+  assert.equal(p.state.lastError.name, 'Travel collision');
+  assert.equal(p.state.path.length, 1);
+});
+
+test('the complete Benchy and dual-nozzle demo run from job preparation to cooling', () => {
+  const benchy = parseGcode(gunzipSync(readFileSync(new URL('../public/jobs/benchy.gcode.gz', import.meta.url))).toString());
+  for (const [job, mapping] of [[benchy, { 0: 0 }], [parseGcode(demoGcode('dual')), { 0: 0, 1: 4 }]]) {
+    const p = boot();
+    p.setTempo(100);
+    p.start(job, mapping);
+    until(p, () => ['complete', 'fault'].includes(p.state.status));
+    assert.equal(p.state.status, 'complete', p.state.lastError?.message);
+    assert.equal(p.state.path.length, job.entries.filter(entry => entry.extrusion && entry.distance).length);
+    assert.equal(p.state.history.length, 1);
+    if (mapping[1] === 4) assert.ok(p.state.path.some(bead => bead.color === p.state.spools[4].color));
+  }
 });

@@ -8,7 +8,7 @@ import { screenView } from './camera.js';
 
 const v = (arr) => new THREE.Vector3(...arr);
 const presets = {
-  studio: [[705, 529, 1030], [12, 305, 0]],
+  studio: [[705, 476, 1060], [12, 305, 0]],
   front: [[0, 358, 1180], [0, 315, 0]],
   rear: [[-5, 423, -1170], [22, 305, -30]],
   left: [[-1120, 416, 40], [0, 304, 0]],
@@ -32,13 +32,13 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   const scene = new THREE.Scene();
   const pmrem = new THREE.PMREMGenerator(renderer);
   const environment = new RoomEnvironment();
-  const baked = pmrem.fromScene(environment, 0.06);
+  const baked = pmrem.fromScene(environment, 0.025);
   scene.environment = baked.texture;
-  scene.environmentIntensity = 0.65;
+  scene.environmentIntensity = 0.49;
   environment.dispose();
   pmrem.dispose();
 
-  const key = new THREE.DirectionalLight(0xe8f3fa, 2.8);
+  const key = new THREE.DirectionalLight(0xe8f3fa, 2.15);
   key.position.set(-540, 900, 480);
   key.castShadow = true;
   const cam = key.shadow.camera;
@@ -46,12 +46,13 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   cam.near = 8; cam.far = 2140;
   key.shadow.mapSize.set(1536, 1536);
   key.shadow.bias = -0.0004; key.shadow.normalBias = 1.5;
+  key.shadow.radius = 4;
   const fill = new THREE.DirectionalLight(0xb3c6d9, 1.15);
   fill.position.set(630, 890, -500);
   scene.add(key, fill, new THREE.HemisphereLight(0xe1eae8, 0x566169, 0.55));
 
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(4500, 4500),
-    new THREE.ShadowMaterial({ color: 0x070b0d, opacity: 0.55, depthWrite: false }));
+    new THREE.ShadowMaterial({ color: 0x070b0d, opacity: 0.19, depthWrite: false }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -1;
   floor.receiveShadow = true;
@@ -96,11 +97,11 @@ export function createView(container, surface, printer, onAction, quality = 'hig
     if (event === 'clear') extrusion.clear();
   });
   let current = 'studio', focus = false, remembered = null, transition = null;
-  let inspect = false, pixelRatio = 1, renderTime = 0;
+  let inspect = false;
   let dimensions = { width: 1, height: 1 };
   function setQuality(value) {
     quality = value;
-    pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 1.65 : quality === 'medium' ? 1.25 : 1);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 1.65 : quality === 'medium' ? 1.25 : 1);
     renderer.setPixelRatio(pixelRatio);
     renderer.shadowMap.enabled = quality !== 'low';
     key.castShadow = quality !== 'low';
@@ -196,9 +197,9 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   let lastRendered = 0;
   function render(now, dt) {
     const state = printer.state;
-    renderTime += dt;
     if (transition) {
-      transition.t += dt;
+      transition.t += Math.min(0.65, Math.max(0.015, (now - (transition.last || now - 1000 * dt)) / 1000));
+      transition.last = now;
       const x = Math.min(1, transition.t / 0.52), f = 1 - (1 - x) ** 3;
       const { from, to } = transition;
       camera.position.lerpVectors(from.position, to.position, f);

@@ -14,8 +14,8 @@ const zinc = metal(0x757b7a, 0.48, 0.75);
 const amber = metal(0xe8ad50, 0.37, 0.56);
 const gasket = metal(0x121419, 0.72, 0.05);
 const glass = new THREE.MeshPhysicalMaterial({ color: 0x718083, metalness: 0.29, roughness: 0.11, clearcoat: 0.85,
-  transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 0.7 });
-const tinted = glass.clone(); tinted.color.set(0x5e6565); tinted.opacity = 0.29;
+  transparent: true, opacity: 0.33, depthWrite: false, side: THREE.DoubleSide, envMapIntensity: 0.7 });
+const tinted = glass.clone(); tinted.color.set(0x5e6565); tinted.opacity = 0.37;
 const tubeMaterial = new THREE.MeshPhysicalMaterial({ color: 0xb9c7ca, transparent: true, opacity: 0.48,
   depthWrite: false, roughness: 0.31, metalness: 0.12 });
 const lens = new THREE.MeshPhysicalMaterial({color: 0x172c41, roughness: 0.1, metalness: 0.7, clearcoat: 1});
@@ -125,7 +125,7 @@ export function makePrinter(scene) {
   const shell = body.clone();
   shell.map = grain();
   shell.bumpMap = shell.map; shell.bumpScale = 0.19;
-  const pei = metal(0x403829, 0.85, 0.39);
+  const pei = metal(0x30261d, 0.85, 0.33);
   pei.map = grain(true); pei.bumpMap = pei.map; pei.bumpScale = 0.23;
 
   // Front is +Z. The chassis outer envelope is 392 × 406 × 478 mm.
@@ -322,7 +322,7 @@ export function makePrinter(scene) {
   box(head, 18, 2.6, 9, 35, -39, -5, steel, 1);
   for (const x of [0, X2D.rightTipOffset]) cy(head, 5.5, 5.5, 8, x, 19, 0, zinc);
 
-  const light = new THREE.SpotLight(0xe9f6f5, 43000, 550, 1.15, 0.68, 1.35);
+  const light = new THREE.SpotLight(0xe9f6f5, 13400, 550, 1.15, 0.68, 1.35);
   light.position.set(-105, 402, 155);
   light.target.position.set(15, 166, -40);
   root.add(light, light.target);
@@ -472,7 +472,7 @@ export function animatePrinter(model, state, carriage, dt, inspection, quality) 
   model.frontGlass.visible = !inspection;
   model.panels.forEach(node => { node.visible = !inspection; });
   model.cover.visible = !inspection;
-  model.light.intensity = state.power && state.lights ? 43000 : 0;
+  model.light.intensity = state.power && state.lights ? 13400 : 0;
   model.lampMat.color.set(state.power && state.lights ? 0xe8fff5 : 0x586367);
   model.powerLight.color.set(state.power ? 0x83f09a : 0x263e32);
   model.fans.forEach((rotor, index) => { rotor.rotation.z += dt * (state.fan * (index + 1) * 0.24 + (state.power ? 0.7 : 0)); });

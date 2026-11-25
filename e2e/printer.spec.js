@@ -8,6 +8,7 @@ const inputFile = {
 test('desktop physical touchscreen controls temperature, opens Benchy, and exits camera focus', async ({ page }) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => localStorage.setItem('x2d-lab:v1', '{"quality":"low"}'));
   await page.setViewportSize({ width: 1180, height: 800 });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Printer', exact: true })).toBeVisible();
@@ -35,6 +36,9 @@ test('iPhone-sized touch layout imports a file, runs a print, and reloads the ap
   const { defaultBrowserType, ...phone } = devices['iPhone 13'];
   const context = await browser.newContext({ ...phone, baseURL: 'http://127.0.0.1:4178' });
   const page = await context.newPage();
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('x2d-lab:v1')) localStorage.setItem('x2d-lab:v1', '{"quality":"low"}');
+  });
   await page.goto('/');
   await expect(page.locator('.status-pill')).toHaveText('Ready', { timeout: 15000 });
   await page.getByLabel('Simulation speed').selectOption('100');
@@ -42,7 +46,7 @@ test('iPhone-sized touch layout imports a file, runs a print, and reloads the ap
   const screen = page.getByRole('region', { name: 'Printer touchscreen' });
   const start = screen.getByRole('button', { name: 'Start print' });
   await expect(start).toBeVisible();
-  await expect.poll(async () => (await screen.boundingBox()).width).toBeGreaterThan(270);
+  await expect.poll(async () => (await screen.boundingBox()).width, { timeout: 15000 }).toBeGreaterThan(270);
   await start.tap();
   await expect(page.locator('.status-pill')).toHaveText('Completed', { timeout: 45000 });
   const manifest = await (await context.request.get('./manifest.webmanifest')).json();

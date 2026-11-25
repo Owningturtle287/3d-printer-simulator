@@ -1,12 +1,24 @@
 import * as THREE from 'three';
 
 const capacity = 4096;
-const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.63, metalness: 0.06 });
+const materials = new Map();
+const finishes = {
+  Matte: [0.87, 0.03], Satin: [0.63, 0.06], Gloss: [0.31, 0.07], Silk: [0.27, 0.28],
+  Metallic: [0.35, 0.61], Translucent: [0.37, 0.04], 'Carbon fiber': [0.81, 0.17],
+};
+function materialFor(finish) {
+  const key = Object.hasOwn(finishes, finish) ? finish : 'Satin';
+  if (!materials.has(key)) {
+    const [roughness, metalness] = finishes[key];
+    materials.set(key, new THREE.MeshStandardMaterial({ vertexColors: true, roughness, metalness }));
+  }
+  return materials.get(key);
+}
 const color = new THREE.Color();
 const faces = [0, 1, 3, 0, 3, 2, 2, 3, 7, 2, 7, 6, 6, 7, 5, 6, 5, 4, 4, 5, 1, 4, 1, 0];
 
 class BeadMesh {
-  constructor(parent, maximum) {
+  constructor(parent, maximum, finish) {
     const geometry = new THREE.BufferGeometry();
     this.count = 0;
     this.position = new Float32Array(maximum * 24);
@@ -19,7 +31,7 @@ class BeadMesh {
     geometry.setAttribute('color', new THREE.BufferAttribute(this.color, 3).setUsage(THREE.DynamicDrawUsage));
     geometry.setIndex(new THREE.BufferAttribute(indices, 1));
     geometry.setDrawRange(0, 0);
-    this.mesh = new THREE.Mesh(geometry, material);
+    this.mesh = new THREE.Mesh(geometry, materialFor(finish));
     this.mesh.frustumCulled = false;
     this.mesh.receiveShadow = true;
     parent.add(this.mesh);
@@ -62,16 +74,18 @@ class BeadMesh {
 export class ExtrusionView {
   constructor(parent) {
     this.parent = parent;
-    this.sections = [];
+    this.sections = new Map();
     this.pending = new Set();
     this.live = new BeadMesh(parent, 1);
     this.live.mesh.visible = false;
   }
   add(bead) {
-    let section = this.sections.at(-1);
+    if (!this.sections.has(bead.finish)) this.sections.set(bead.finish, []);
+    const sections = this.sections.get(bead.finish);
+    let section = sections.at(-1);
     if (!section || section.count === capacity) {
-      section = new BeadMesh(this.parent, capacity);
-      this.sections.push(section);
+      section = new BeadMesh(this.parent, capacity, bead.finish);
+      sections.push(section);
     }
     section.write(bead, section.count);
     this.pending.add(section);
@@ -85,14 +99,15 @@ export class ExtrusionView {
     this.live.mesh.visible = !!(entry?.extrusion && entry.distance > 0 && segment?.deposited);
     if (!this.live.mesh.visible) return;
     const spool = state.spools[job.mapping[entry.tool]];
+    this.live.mesh.material = materialFor(spool.finish);
     this.live.firstDirty = 0;
     const to = Object.fromEntries(['x', 'y', 'z'].map(axis => [axis, segment.from[axis] + (segment.to[axis] - segment.from[axis]) * segment.fraction]));
     this.live.write({ ...entry, to, color: spool.color, finish: spool.finish }, 0);
     this.live.upload();
   }
   clear() {
-    this.sections.forEach(section => section.destroy());
-    this.sections = [];
+    for (const sections of this.sections.values()) for (const section of sections) section.destroy();
+    this.sections.clear();
     this.pending.clear();
     this.live.mesh.visible = false;
   }

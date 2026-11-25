@@ -12,6 +12,7 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
   let layer = 0, layerZ = -1, layerHeight = 0.2, width = 0.44, retracted = 0, seenExtrusion = false;
   let declaredLayer = null, declaredTime = null, nozzleSize = null, slicer = '', chamberTarget = 0;
   const pending = [];
+  let printAccel = 0, travelAccel = 0;
   const materials = {}, toolNozzles = {};
   const bounds = { x: [Infinity, -Infinity], y: [Infinity, -Infinity], z: [Infinity, -Infinity] };
   let estimated = 0, totalExtrusion = 0, skipped = 0;
@@ -27,14 +28,14 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
   function move(to, extrusion, line) {
     const distance = dist(p, to);
     if (distance <= 1e-6 && extrusion <= 1e-6) { p = to; return; }
-    const entry = { kind: 'move', from: p, to, distance, feed: feed / 60, tool, extrusion, layer, width, height: layerHeight, line };
+    const entry = { kind: 'move', from: p, to, distance, feed: feed / 60, tool, extrusion, layer, width, height: layerHeight, printAccel, travelAccel, line };
     if (extrusion > 0 && distance > 1e-6) {
       if (!reachable(to)) throw new Error(`Line ${line}: extrusion is outside the 256 × 256 × 260 mm envelope.`);
       if (!seenExtrusion) {
         seenExtrusion = true;
         for (const item of pending.filter(item => item.kind !== 'move').slice(-180)) push(item);
         if (!reachable(p)) throw new Error(`Line ${line}: the first extrusion starts outside the build volume.`);
-        if (distance > 1e-6) push({ ...entry, from: p, to: p, distance: 0, extrusion: 0 });
+        if (distance > 1e-6) push({ ...entry, from: p, to: p, distance: 0, extrusion: 0, approach: true });
       }
       if (declaredLayer === null && to.z > layerZ + 0.025) {
         layerHeight = layerZ < 0 ? Math.min(0.4, Math.max(0.08, to.z)) : Math.min(0.6, to.z - layerZ);
@@ -99,7 +100,11 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
       const next = Number(code.slice(1));
       if (Number.isInteger(next) && next >= 0 && next < 16) {
         tool = next; retracted = 0;
-        if (bambu && [0, 1].includes(args.H)) toolNozzles[tool] = args.H;
+        if (bambu && [0, 1].includes(args.H)) {
+          if (Object.hasOwn(toolNozzles, tool) && toolNozzles[tool] !== args.H)
+            throw new Error('A filament switches between both hotends. This file requires routing beyond the default Combo configuration.');
+          toolNozzles[tool] = args.H;
+        }
       } else skipped++;
       continue;
     }
@@ -108,15 +113,20 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
       skipped++;
       continue;
     }
-    if (ignore) continue;
     if (code === 'G90') { xyzAbsolute = true; continue; }
     if (code === 'G91') { xyzAbsolute = false; continue; }
     if (code === 'M82') { eAbsolute = true; continue; }
     if (code === 'M83') { eAbsolute = false; continue; }
     if (code === 'G20' || code === 'G21') { scale = code === 'G20' ? 25.4 : 1; continue; }
+    if (ignore) continue;
     if (code === 'G92') {
       for (const axis of ['x', 'y', 'z']) if (xyz(axis) !== undefined) off[axis] = p[axis] - xyz(axis) * scale;
       if (args.E !== undefined) eOffset = e - args.E * scale;
+      continue;
+    }
+    if (code === 'M204') {
+      if ((args.P ?? args.S) > 0) printAccel = args.P ?? args.S;
+      if ((args.T ?? args.S) > 0) travelAccel = args.T ?? args.S;
       continue;
     }
     if (!enteredBody) {

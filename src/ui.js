@@ -63,7 +63,7 @@ export function layout() {
         ${button('Exit screen', 'exit', 'back', 'focus-exit')}
         <div class="scene-fallback" hidden><strong>3D view unavailable</strong><span>This device could not start WebGL 2.</span>${button('Open printer controls', 'screen', 'monitor', 'primary')}</div>
       </div>
-      <div class="scene-footer"><span>Bambu Lab X2D Combo</span><span class="dimensions">392 × 406 × 478 mm <i></i> CoreXY</span><span class="axis-readout" data-text="xyz">X 128.0 · Y 128.0 · Z 118.0</span></div>
+      <div class="scene-footer"><span>Bambu Lab X2D Combo</span><span class="dimensions">392 × 406 × 478 mm <i></i> CoreXY</span><span class="axis-readout" data-text="xyz">X 142.0 · Y 80.0 · Z 118.0</span></div>
     </section>
     <aside class="inspector" aria-label="Simulator controls">
       <div class="tabs" aria-label="Inspector pages">
