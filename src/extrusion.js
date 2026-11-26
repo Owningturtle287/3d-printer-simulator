@@ -15,7 +15,11 @@ function materialFor(finish) {
   return materials.get(key);
 }
 const color = new THREE.Color();
-const faces = [0, 1, 3, 0, 3, 2, 2, 3, 7, 2, 7, 6, 6, 7, 5, 6, 5, 4, 4, 5, 1, 4, 1, 0];
+// The four longitudinal edges are top-left, top-right, bottom-right, bottom-left.
+const faces = [
+  0, 2, 3, 0, 3, 1, 2, 4, 5, 2, 5, 3, 4, 6, 7, 4, 7, 5, 6, 0, 1, 6, 1, 7,
+  0, 6, 4, 0, 4, 2, 1, 3, 5, 1, 5, 7,
+];
 
 class BeadMesh {
   constructor(parent, maximum, finish) {
@@ -52,7 +56,8 @@ class BeadMesh {
       const ny = top ? 0.77 : -0.77;
       for (let end = 0; end < 2; end++) {
         const p = positions[end], at = index * 24 + (pair * 2 + end) * 3;
-        this.position.set([p.x - 128 + sidewaysX * side * widthOffset, p.z - (top ? 0.035 : height), 128 - p.y + sidewaysZ * side * widthOffset], at);
+        const y = top ? p.z : Math.max(0, p.z - height);
+        this.position.set([p.x - 128 + sidewaysX * side * widthOffset, y, 128 - p.y + sidewaysZ * side * widthOffset], at);
         this.normal.set([nx, ny, nz], at);
         this.color.set([color.r, color.g, color.b], at);
       }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { filamentPackRadius } from './ams.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { V, box, cy, group, metal, ebon, rubber, steel } from './model-parts.js';
 
@@ -111,7 +112,7 @@ function liveTube(parent, material, radius, rows = 36, sides = 10) {
   return { draw, curve: c => draw((t,p) => c.getPoint(t,p), (t,v) => c.getTangent(t,v)) };
 }
 
-export function makeCarriageHarness(scene, gantry, hardware, stationaryCurves) {
+export function makeCarriageHarness(scene, gantry, hardware, stationaryCurves, amsBranches) {
   const links = new THREE.InstancedMesh(linkGeometry(), metal(0x25292a, .63, .15), LINK_COUNT);
   links.castShadow = links.receiveShadow = true;
   links.frustumCulled = false;
@@ -128,14 +129,22 @@ export function makeCarriageHarness(scene, gantry, hardware, stationaryCurves) {
       transparent: true, opacity: .74, depthWrite: false,
     });
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(92 * 3), 3).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(210 * 3), 3).setUsage(THREE.DynamicDrawUsage));
     const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0xd7ac79, transparent: true, opacity: .86 }));
     line.visible = false;
     line.frustumCulled = false;
     scene.add(line);
-    return { sections, inlet: hardware.inlets[i], line, tube: liveTube(scene, material, 2.15, 32, 10) };
+    return { ...sections, inlet: hardware.inlets[i], line, tube: liveTube(scene, material, 2.15, 32, 10) };
   });
-  return { links, wire, umbilical, tubes, headY: hardware.root.position.y, matrix: new THREE.Matrix4(), lastX: NaN, lastZ: NaN };
+  return { links, wire, umbilical, tubes, amsBranches, headY: hardware.root.position.y, matrix: new THREE.Matrix4(), lastX: NaN, lastZ: NaN };
+}
+
+function spoolLead(branch, radius) {
+  const { center, mouth } = branch;
+  const dy = mouth.y - center.y, dz = mouth.z - center.z;
+  const angle = Math.atan2(dz, dy) + Math.acos(Math.min(1, radius / Math.hypot(dy,dz)));
+  const takeoff = V(center.x, center.y + radius * Math.cos(angle), center.z + radius * Math.sin(angle));
+  return new THREE.LineCurve3(takeoff, mouth);
 }
 
 export function animateCarriageHarness(harness, headX, headZ, gantryY, state, quality) {
@@ -165,32 +174,43 @@ export function animateCarriageHarness(harness, headX, headZ, gantryY, state, qu
     harness.lastZ = headZ;
   }
   for (const [i, route] of harness.tubes.entries()) {
-    if (moveX || moveZ || !route.flex) {
-      const start = route.sections.at(-1).geometryEnd;
+    const moved = moveX || moveZ || !route.flex;
+    if (moved) {
       const inlet = route.inlet.clone().add(V(headX, gantryY + harness.headY, headZ));
       const bend = headX + sectionLength(headX);
-      route.flex = new THREE.CatmullRomCurve3([start, V(-139 + i*10, 455 + i*4, -151),
+      route.flex = new THREE.CatmullRomCurve3([route.geometryEnd, V(-139 + i*10, 455 + i*4, -151),
         V(-103 + i*13, 456 + i*4, headZ - 38), V(bend - 18 + i*7, 457 + i*3, headZ - 22),
         V(inlet.x + 12 + 2*i, 447 + i*5, inlet.z - 7), V(inlet.x + .9, inlet.y + 10, inlet.z), inlet],
         false, 'centripetal');
       route.tube.curve(route.flex);
-      route.curves = [...route.sections.map(s => s.curve), route.flex];
-      route.lengths = route.curves.map(c => c.getLength());
-      route.total = route.lengths.reduce((a,b) => a+b, 0);
     }
     const feed = state.feed?.nozzle === i ? state.feed : null;
     const slot = feed?.slot ?? state.loaded[i];
     const extent = feed?.fraction ?? (slot === null ? 0 : 1);
-    route.line.visible = extent > 0;
-    if (!route.line.visible || (!moveX && !moveZ && route.slot === slot && route.extent === extent &&
-        route.color === state.spools[slot].color)) continue;
+    route.line.visible = extent > 0 && slot != null;
+    if (!route.line.visible) { route.slot = null; continue; }
+
+    const spool = state.spools[slot];
+    const branch = i === 0 ? harness.amsBranches[slot] : null;
+    const radius = branch ? filamentPackRadius(branch.fullRadius, spool) : 0;
+    const branchChanged = route.slot !== slot || Math.abs(radius - route.radius) >= .15;
+    if (branchChanged) {
+      route.prefix = branch ? [spoolLead(branch, radius), ...branch.curves] : [];
+      route.radius = radius;
+    }
+    if (moved || branchChanged) {
+      route.liveCurves = [...route.prefix, ...route.curves, route.flex];
+      route.lengths = route.liveCurves.map(curve => curve.getLength());
+      route.total = route.lengths.reduce((sum, length) => sum + length, 0);
+    }
+    if (!moved && !branchChanged && route.extent === extent && route.color === spool.color) continue;
     route.slot = slot; route.extent = extent; route.color = state.spools[slot].color;
     route.line.material.color.set(route.color);
     const attr = route.line.geometry.attributes.position;
     for (let j = 0; j < attr.count; j++) {
       let distance = route.total * extent * j / (attr.count - 1), k = 0;
       while (k < route.lengths.length-1 && distance > route.lengths[k]) distance -= route.lengths[k++];
-      const p = route.curves[k].getPointAt(Math.min(1, distance / route.lengths[k]));
+      const p = route.liveCurves[k].getPointAt(Math.min(1, distance / route.lengths[k]));
       attr.setXYZ(j, p.x, p.y, p.z);
     }
     attr.needsUpdate = true;

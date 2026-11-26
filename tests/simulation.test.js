@@ -7,7 +7,7 @@ import { gunzipSync } from 'node:zlib';
 import { VirtualPrinter } from '../src/printer.js';
 import { reachable, coreXY, carriageFor, grams, X2D, coolingTargets } from '../src/spec.js';
 import { parseGcode, validateMapping } from '../src/gcode.js';
-import { demoGcode } from '../src/demos.js';
+import { BENCHY_TOOLPATH, demoGcode } from '../src/demos.js';
 import { loadPreferences, savePreferences } from '../src/storage.js';
 import { screenView } from '../src/camera.js';
 import { Quaternion, Vector3 } from 'three';
@@ -176,7 +176,7 @@ test('demo files have compatible toolpaths, and Benchy contains the original mod
     assert.ok(job.layers > 30);
     validateMapping(job, id === 'dual' ? { 0: 0, 1: 4 } : { 0: 0, 1: 1, 2: 2, 3: 3 });
   }
-  const benchy = parseGcode(gunzipSync(readFileSync(new URL('../public/jobs/benchy.gcode.gz', import.meta.url))).toString());
+  const benchy = parseGcode(gunzipSync(readFileSync(new URL(`../public/${BENCHY_TOOLPATH}`, import.meta.url))).toString());
   assert.equal(benchy.layers, 240);
   assert.ok(benchy.entries.length > 15000);
   assert.ok(Math.abs(benchy.bounds.x[1] - benchy.bounds.x[0] - 60) < 0.2);
@@ -211,7 +211,7 @@ test('low travel through a previously deposited high layer pauses with a collisi
 });
 
 test('the complete Benchy and dual-nozzle demo run from job preparation to cooling', () => {
-  const benchy = parseGcode(gunzipSync(readFileSync(new URL('../public/jobs/benchy.gcode.gz', import.meta.url))).toString());
+  const benchy = parseGcode(gunzipSync(readFileSync(new URL(`../public/${BENCHY_TOOLPATH}`, import.meta.url))).toString());
   for (const [job, mapping] of [[benchy, { 0: 0 }], [parseGcode(demoGcode('dual')), { 0: 0, 1: 4 }]]) {
     const p = boot();
     p.setTempo(100);

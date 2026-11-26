@@ -29,7 +29,7 @@ The build is a static progressive web app. iPhone uses Safari and Add to Home Sc
 
 ## What the simulator supports
 
-- Millimeter-scale scene with orbit, pan, pinch zoom, preset views, cutaway, chamber-camera viewpoint, interactive door, AMS lid, and power switch. Select **Printhead** to follow the carriage and enable **Cutaway** to expose the dual hotends.
+- Millimeter-scale scene with orbit, pan, pinch zoom, preset views, cutaway, chamber-camera viewpoint, interactive door, AMS lid, and power switch. Select **Printhead** to follow the carriage and enable **Cutaway** to expose the dual hotends. Choose **Build plate** in the camera menu to follow the print surface as the bed moves.
 - Shared virtual printer state for temperatures, filament, motion, calibration, both nozzles, the displayed print and the physical scene.
 - Left main nozzle from the AMS and right auxiliary nozzle from the external spool. Assign job tools to these routes in print preparation. Filament profiles, color, density, remaining mass and local files persist in browser storage.
 - G-code and sliced 3MF plates with optional thumbnails. The browser also slices small, closed, unsliced 3MF meshes with a lightweight contour and infill slicer.

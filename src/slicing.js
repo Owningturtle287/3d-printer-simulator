@@ -1,5 +1,8 @@
 import { area, X2D } from './spec.js';
 
+const SKIN_LAYERS = 3;
+const INFILL_STRIDE = 8;
+
 export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220, acceptLegacySeams = false } = {}) {
   if (!triangles.length || triangles.length > 300_000) throw new Error('This slicer supports meshes with 1–300,000 triangles.');
   const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
@@ -35,6 +38,15 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
     'G21', 'G90', 'M83', `M140 S${bed}`, `M104 S${nozzle}`];
   const format = n => Number(n.toFixed(3));
   const width = X2D.nozzle * 1.1;
+  const pitch = width * 0.9;
+  const profiles = new Map();
+  function profileAt(index, axis) {
+    if (!slices[index]?.length) return emptyProfile;
+    if (!profiles.has(index)) profiles.set(index, []);
+    const pair = profiles.get(index);
+    pair[axis] ??= scanProfile(slices[index], axis, pitch);
+    return pair[axis];
+  }
   function path(points, speed) {
     if (points.length < 2) return;
     const xy = ([x, y]) => `X${format(x + origin[0])} Y${format(y + origin[1])}`;
@@ -47,6 +59,7 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
     if (lines.length > 630_000) throw new Error('The sliced model exceeds the simulator’s toolpath limit.');
   }
   for (let i = 0; i < slices.length; i++) {
+    profiles.delete(i - SKIN_LAYERS - 1);
     const segments = slices[i];
     if (!segments.length) continue;
     const contours = connect(segments);
@@ -55,9 +68,16 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
     }
     lines.push(`;LAYER:${i}`, `G0 Z${format(Math.min((i + 1) * layer, 260))} F1200`);
     for (const contour of contours) path(simplify(contour, key(contour[0]) === key(contour.at(-1))), i < 2 ? 1500 : 3300);
-    const dense = i < 3 || i >= layers - 3;
-    const fillStep = dense ? 0.48 : 3.2;
-    for (const stroke of scanFill(segments, i % 2, fillStep, width / 2)) path(stroke, i < 2 ? 1500 : 4200);
+    const axis = i % 2;
+    const neighbors = [];
+    for (let distance = 1; distance <= SKIN_LAYERS; distance++) {
+      neighbors.push(profileAt(i - distance, axis), profileAt(i + distance, axis));
+    }
+    const { skin, infill } = fillStrokes(profileAt(i, axis), neighbors, axis, pitch, width);
+    if (skin.length) lines.push(';TYPE:Solid skin');
+    for (const stroke of skin) path(stroke, i < 2 ? 1500 : 3000);
+    if (infill.length) lines.push(';TYPE:Sparse infill');
+    for (const stroke of infill) path(stroke, i < 2 ? 1500 : 4200);
   }
   lines.push('M104 S0', 'M140 S0', 'M107');
   return { gcode: lines.join('\n'), size };
@@ -104,7 +124,12 @@ function simplify(points, closed) {
   return out;
 }
 
-function scanFill(segments, axis, step, inset) {
+const emptyProfile = new Map();
+const emptyIntervals = [];
+
+// Slice all neighboring layers on the same scanlines so a local change in the
+// footprint exposes only that part of the current layer.
+function scanProfile(segments, axis, step) {
   const cross = 1 - axis;
   const rows = new Map();
   for (const [a, b] of segments) {
@@ -117,16 +142,77 @@ function scanFill(segments, axis, step, inset) {
       rows.get(i).push(hit);
     }
   }
-  const result = [];
-  for (const [i, hits] of [...rows.entries()].sort((a, b) => a[0] - b[0])) {
+  for (const [i, hits] of rows) {
     hits.sort((a, b) => a - b);
-    const at = (i + 0.5) * step;
+    const intervals = [];
     for (let k = 0; k + 1 < hits.length; k += 2) {
-      const lo = hits[k] + inset, hi = hits[k + 1] - inset;
-      if (hi - lo < 0.3) continue;
-      const pair = axis === 0 ? [[lo, at], [hi, at]] : [[at, lo], [at, hi]];
-      result.push(i % 2 ? pair.reverse() : pair);
+      if (hits[k + 1] - hits[k] > 0.002) intervals.push([hits[k], hits[k + 1]]);
+    }
+    rows.set(i, intervals);
+  }
+  return rows;
+}
+
+function fillStrokes(current, neighbors, axis, pitch, width) {
+  const skin = [], infill = [];
+  for (const [row, outline] of [...current.entries()].sort((a, b) => a[0] - b[0])) {
+    const printable = inset(outline, width * 0.4);
+    if (!printable.length) continue;
+    let buried = outline;
+    for (const neighbor of neighbors) {
+      buried = intersect(buried, neighbor.get(row) || emptyIntervals);
+      if (!buried.length) break;
+    }
+    // Small coverage overlap at the handoff keeps the skin tied to the core.
+    const core = inset(buried, width * 0.6);
+    const at = (row + 0.5) * pitch;
+    const draw = (intervals, strokes, reverse) => {
+      const ordered = reverse ? intervals.reverse() : intervals;
+      for (const [a, b] of ordered) {
+        if (b - a < 0.18) continue;
+        const [lo, hi] = reverse ? [b, a] : [a, b];
+        strokes.push(axis === 0 ? [[lo, at], [hi, at]] : [[at, lo], [at, hi]]);
+      }
+    };
+    draw(subtract(printable, core), skin, row % 2 !== 0);
+    if (row % INFILL_STRIDE === 0) {
+      const overlap = core.map(([lo, hi]) => [lo - width * 0.18, hi + width * 0.18]);
+      draw(intersect(printable, overlap), infill, (row / INFILL_STRIDE) % 2 !== 0);
     }
   }
-  return result;
+  return { skin, infill };
+}
+
+function inset(intervals, amount) {
+  return intervals.filter(([lo, hi]) => hi - lo > 2 * amount)
+    .map(([lo, hi]) => [lo + amount, hi - amount]);
+}
+
+function intersect(first, second) {
+  const shared = [];
+  let a = 0, b = 0;
+  while (a < first.length && b < second.length) {
+    const lo = Math.max(first[a][0], second[b][0]), hi = Math.min(first[a][1], second[b][1]);
+    if (hi > lo) shared.push([lo, hi]);
+    if (first[a][1] < second[b][1]) a++;
+    else b++;
+  }
+  return shared;
+}
+
+function subtract(first, second) {
+  const rest = [];
+  let j = 0;
+  for (const [lo, hi] of first) {
+    let start = lo;
+    while (j < second.length && second[j][1] <= lo) j++;
+    for (let k = j; k < second.length && second[k][0] < hi; k++) {
+      const [from, to] = second[k];
+      if (from > start) rest.push([start, from]);
+      start = Math.max(start, to);
+      if (start >= hi) break;
+    }
+    if (start < hi) rest.push([start, hi]);
+  }
+  return rest;
 }

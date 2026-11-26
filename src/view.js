@@ -16,7 +16,7 @@ const presets = {
   top: [[0, 1720, 18], [0, 299, 0]],
   chamber: [[106, 338, 466], [-10, 311, -61]],
   camera: [[-147, 382, 143], [41, 226, -48]],
-  ams: [[350, 782, 581], [0, 546, -6]],
+  ams: [[303, 922, 476], [0, 595, -14]],
   external: [[577, 411, -459], [213, 290, -132]],
 };
 
@@ -110,9 +110,19 @@ export function createView(container, surface, printer, onAction, quality = 'hig
     resize();
   }
   function focusTransform() { return screenView(screenPivot, screenQuaternion, camera.aspect, camera.fov); }
+  function anchorFor(name) {
+    if (name === 'head') return chassis.head;
+    if (name === 'build') return chassis.bed;
+    return null;
+  }
   function presetTransform(name) {
     if (name === 'screen') return focusTransform();
     let [position, target] = presets[name] || presets.studio;
+    if (name === 'build') {
+      const bed = chassis.bed.getWorldPosition(tracked);
+      target = [bed.x, bed.y + 17, bed.z + 4];
+      position = [bed.x + 66, bed.y + 114, bed.z + 100];
+    }
     if (name === 'head') {
       const gp = chassis.head.getWorldPosition(tracked);
       target = [gp.x + 13, gp.y - 17, gp.z + 2];
@@ -142,20 +152,20 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   }
   function moveTo(transform) {
     transition = { from: { position: camera.position.clone(), target: orbit.target.clone(), up: camera.up.clone() },
-      to: transform, t: 0 };
+      to: transform, startedAt: performance.now() };
     orbit.enabled = false;
   }
   function show(name) {
     if (name === 'screen') {
       if (focus) return;
       remembered = { position: camera.position.clone(), target: orbit.target.clone(), up: camera.up.clone(),
-        anchor: current === 'head' ? tracked.clone() : null };
+        anchor: anchorFor(current) ? tracked.clone() : null };
       focus = true;
     } else if (focus) {
       focus = false;
       if (name === 'exit') {
         if (remembered?.anchor) {
-          chassis.head.getWorldPosition(tracked);
+          anchorFor(current).getWorldPosition(tracked);
           trackingDelta.subVectors(tracked, remembered.anchor);
           remembered.position.add(trackingDelta);
           remembered.target.add(trackingDelta);
@@ -189,14 +199,16 @@ export function createView(container, surface, printer, onAction, quality = 'hig
     const rect = renderer.domElement.getBoundingClientRect();
     raycaster.setFromCamera(new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1,
       -(event.clientY - rect.top) / rect.height * 2 + 1), camera);
-    const hits = raycaster.intersectObject(chassis.root, true).filter(hit => hit.object.visible && hit.object.material.opacity >= 0.2);
-    for (const hit of hits) {
-      let node = hit.object;
-      while (node && node !== chassis.root) {
-        if (node.userData.action) { onAction(node.userData.action); return; }
-        node = node.parent;
+    for (const { object } of raycaster.intersectObject(chassis.root, true)) {
+      if (object.material.opacity < 0.2) continue;
+      let action, visible = true;
+      for (let node = object; node && node !== chassis.root; node = node.parent) {
+        visible &&= node.visible;
+        action ??= node.userData.action;
       }
-      if (!hit.object.material.transparent) return;
+      if (!visible) continue;
+      if (action) { onAction(action); return; }
+      if (!object.material.transparent) return;
     }
   });
   renderer.domElement.addEventListener('pointercancel', () => { pressed = null; });
@@ -206,9 +218,11 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   let lastRendered = 0;
   function render(now, dt) {
     const state = printer.state;
-    animatePrinter(chassis, state, printer.carriage, dt, inspect, quality, !focus && (current === 'head' || current === 'chamber'));
-    if (current === 'head' && !focus) {
-      chassis.head.getWorldPosition(nextTracked);
+    const inspectingChamber = ['head', 'chamber', 'build', 'camera'].includes(current);
+    animatePrinter(chassis, state, printer.carriage, dt, inspect, quality, !focus && inspectingChamber);
+    const anchor = anchorFor(current);
+    if (anchor && !focus) {
+      anchor.getWorldPosition(nextTracked);
       trackingDelta.subVectors(nextTracked, tracked);
       tracked.copy(nextTracked);
       if (transition) {
@@ -220,9 +234,8 @@ export function createView(container, surface, printer, onAction, quality = 'hig
       }
     }
     if (transition) {
-      transition.t += Math.min(0.65, Math.max(0.015, (now - (transition.last || now - 1000 * dt)) / 1000));
-      transition.last = now;
-      const x = Math.min(1, transition.t / 0.52), f = 1 - (1 - x) ** 3;
+      const x = THREE.MathUtils.clamp((now - transition.startedAt) / 520, 0, 1);
+      const f = 1 - (1 - x) ** 3;
       const { from, to } = transition;
       camera.position.lerpVectors(from.position, to.position, f);
       orbit.target.lerpVectors(from.target, to.target, f);
@@ -237,12 +250,11 @@ export function createView(container, surface, printer, onAction, quality = 'hig
     extrusion.update(state);
     const normal = v([0, 0, 1]).applyQuaternion(screenQuaternion);
     const toward = camera.position.clone().sub(screenPivot).normalize();
-    const closeView = current === 'head' || current === 'chamber' || current === 'camera';
-    surface.style.visibility = normal.dot(toward) > 0.22 && (focus || !closeView) ? 'visible' : 'hidden';
+    surface.style.visibility = normal.dot(toward) > 0.22 && (focus || !inspectingChamber) ? 'visible' : 'hidden';
     if (quality === 'low' && now - lastRendered < 31) return;
     lastRendered = now;
-    renderer.render(scene, camera);
     overlay.render(cssScene, camera);
+    renderer.render(scene, camera);
   }
   function capture() {
     renderer.render(scene, camera);

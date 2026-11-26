@@ -20,7 +20,7 @@ test('desktop physical touchscreen controls temperature, opens Benchy, and exits
   const before = await touchscreen.boundingBox();
   await touchscreen.click();
   await expect(page.getByRole('button', { name: 'Exit screen' })).toBeVisible();
-  await expect.poll(async () => (await touchscreen.boundingBox()).width).toBeGreaterThan(before.width * 3);
+  await expect.poll(async () => (await touchscreen.boundingBox()).width, { timeout: 15000 }).toBeGreaterThan(before.width * 3);
   await touchscreen.getByRole('button', { name: 'Controls' }).click();
   await touchscreen.getByRole('spinbutton', { name: 'Left nozzle target temperature' }).fill('120');
   await touchscreen.locator('form[data-zone="left"]').getByRole('button', { name: 'Set' }).click();

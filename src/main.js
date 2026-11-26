@@ -24,7 +24,7 @@ let mapping = {}, pending = false, files = [], sourceJob = null, messageTimer, r
 
 const zones = { left: 'Left nozzle', right: 'Right nozzle', bed: 'Build plate', chamber: 'Chamber' };
 const views = { studio: 'Studio', front: 'Front', rear: 'Rear', left: 'Left side', right: 'Right side', top: 'Top',
-  chamber: 'Chamber', head: 'Printhead', ams: 'AMS 2 Pro', external: 'External spool', camera: 'Chamber camera' };
+  chamber: 'Chamber', build: 'Build plate', head: 'Printhead', ams: 'AMS 2 Pro', external: 'External spool', camera: 'Chamber camera' };
 const statuses = { booting: 'Starting', idle: 'Ready', preparing: 'Preparing', printing: 'Printing', paused: 'Paused',
   fault: 'Attention', complete: 'Completed', off: 'Powered off' };
 const issueNames = ['Filament tangle', 'Nozzle clog', 'First-layer adhesion', 'Nozzle switch', 'Camera detected spaghetti', 'Temperature deviation'];
@@ -81,7 +81,12 @@ function openPage(next, focus = true) {
 }
 function setTab(next) { tab = next; renderInspector(); }
 function physicalAction(action) {
-  if (action === 'ams' || action === 'lid') { setView('ams'); setTab('filament'); return; }
+  if (action === 'ams' || action === 'lid') {
+    setView('ams');
+    setTab('filament');
+    if (action === 'lid') runAction('lid').catch(error => notify(error.message, true));
+    return;
+  }
   if (action === 'head') { setView('head'); return; }
   if (action === 'external') { setView('external'); setTab('filament'); return; }
   if (action.startsWith('slot-')) { selectSpool(Number(action.slice(5))); return; }

@@ -54,7 +54,7 @@ export function layout() {
         <div class="stage-bottom">
           <div class="view-bar">
             <label class="view-select">${icon('orbit')}<select data-change="view" aria-label="Camera view">
-            <option value="studio">Studio</option><option value="front">Front</option><option value="rear">Rear</option><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="chamber">Chamber</option><option value="head">Printhead</option><option value="ams">AMS 2 Pro</option><option value="external">External spool</option><option value="camera">Chamber camera</option>
+            <option value="studio">Studio</option><option value="front">Front</option><option value="rear">Rear</option><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="chamber">Chamber</option><option value="build">Build plate</option><option value="head">Printhead</option><option value="ams">AMS 2 Pro</option><option value="external">External spool</option><option value="camera">Chamber camera</option>
             </select></label>
             ${button('Door', 'door', 'door', 'camera-button')}${button('Cutaway', 'inspect', 'layers', 'camera-button')}${button('Screen', 'screen', 'focus', 'camera-button screen-shortcut')}
           </div>

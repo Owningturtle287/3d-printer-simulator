@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { X2D, coreXY, coolingTargets } from './spec.js';
-import { V, metal, plastic, body, edge, rubber, ebon, steel, zinc, amber, gasket, glass, tinted,
+import { V, metal, plastic, body, edge, rubber, ebon, steel, zinc, gasket, glass, tinted,
   add, box, cy, group, mark, grain, label, screw, tube } from './model-parts.js';
 import { makeAxialFan, animateFan } from './fans.js';
 import { makeToolhead, animateToolhead, plateHeight, GANTRY_Y } from './toolhead.js';
 import { makeCarriageHarness, animateCarriageHarness, makeTimingBelt, makeBeltPulley } from './carriage-harness.js';
-import { makeChamber, animateChamber } from './chamber.js';
+import { makeChamber, animateChamber, makeCalibrationBoard } from './chamber.js';
+import { makeAms, animateAms, makeSpool, updateSpool } from './ams.js';
+import { makeRearFeed, animateRearFeed } from './rear-feed.js';
 
 export function makePrinter(scene) {
   const root = group(scene), exterior = group(root);
@@ -34,6 +36,13 @@ export function makePrinter(scene) {
   for (const front of [-1, 1]) box(exterior, width, 64, 29, 0, 445, front * 188.5, shell, 7);
   for (const side of [-1, 1]) box(exterior, 26, 64, 355, side * 183, 445, 0, shell, 5);
   box(exterior, 341, 4.8, 345, 0, 473, 0, glass, 1);
+  const liftKnob = group(root, -59, 477, 155);
+  cy(liftKnob, 6.2, 6.2, 7, 0, 1, 0, ebon);
+  const knob = cy(liftKnob, 12, 11.7, 3.3, 0, 5.4, 0, steel, 'y', 36);
+  knob.scale.z = .81;
+  for (const x of [-2.1, 2.1]) for (const z of [-1.8, 1.8]) {
+    box(liftKnob, 3.5, .1, 2.7, x, 7.1, z, ebon, .06).rotation.y = -.15;
+  }
   box(exterior, 353, 2.5, 1, 0, 408, 200, zinc, 0.4);
   label(exterior, 'Bambu Lab   X2D', 99, 16, 113, 452, 203.2, { color: '#141718', size: 29, weight: 800 });
 
@@ -90,27 +99,6 @@ export function makePrinter(scene) {
   box(power, 3, 2, 1, 0, 14, -11.5, powerLight, 0.3);
   box(power, 23, 18, 9, 0, -13, -9, rubber, 2);
   tube(rear, [V(136, 78, -20), V(136, 63, -47), V(136, 7, -57), V(112, 4, -135), V(58, 4, -211)], 3, rubber, 28);
-  const buffer = group(rear, 37, 274, -16);
-  box(buffer, 98, 55, 21, 0, 0, 0, plastic, 4);
-  for (const y of [-13, 10]) {
-    box(buffer, 62, 9, 1, -7, y, -11, rubber, 2);
-    for (let i = 0; i < 8; i++) box(buffer, 0.8, 6, 1, -37 + i * 1.9, y, -12, zinc);
-    cy(buffer, 5, 5, 10, 54, y, 0, zinc, 'x');
-  }
-  label(buffer, 'FILAMENT BUFFER', 57, 9, 7, 19, -11.1, { side: 'rear', size: 25 });
-  for (const x of [-25, -7]) box(buffer, 11, 6, 9, x, 28, 0, ebon, 1);
-  const aux = group(rear, -98, 365, -14);
-  box(aux, 69, 71, 23, 0, 0, 0, plastic, 4);
-  box(aux, 56, 10, 1.5, 0, 31, -12, zinc, 1);
-  for (const x of [-15, 9]) box(aux, 3, 35, 0.8, x, -8, -12, rubber, 1);
-  label(aux, 'AUX', 29, 11, -7, 16, -12.2, { side: 'rear', size: 26 });
-  for (const y of [366, 381]) {
-    box(rear, 29, 10, 16, -133, y, -5, plastic, 2);
-    cy(rear, 4.5, 4.5, 12, -151, y, -6, zinc, 'x');
-  }
-  box(rear, 31, 29, 7, 124, 355, -6, plastic, 2);
-  box(rear, 17, 5, 1.8, 124, 354, -10, rubber, 1);
-  box(rear, 22, 13, 8, -146, 330, -7, plastic, 2);
   label(rear, 'X2D  /  100–240 V~', 67, 13, 48, 86, -4.2, { side: 'rear', size: 25, background: '#43494a' });
   label(rear, 'CAUTION  HOT SURFACE', 66, 9, 47, 70, -4.2, { side: 'rear', size: 21, color: '#d9ad57' });
 
@@ -126,6 +114,9 @@ export function makePrinter(scene) {
   box(door, 38, 14, 11, 320, 187, 8, steel, 6);
   label(door, 'Bambu Lab', 32, 8, 320, 187, 14, { color: '#202426', size: 30 });
 
+  box(root, 84, 26, 15, -113, 442, 204, plastic, 4);
+  cy(root, 9.1, 9.1, 87, -113, 442, 208, edge, 'x', 36);
+  for (const x of [-156.7, -69.3]) cy(root, 7.8, 7.8, 1.1, x, 442, 208, rubber, 'x', 30);
   const screen = mark(group(root, -113, 445, 210), 'screen');
   screen.rotation.x = -0.20;
   box(screen, 128, 78, 13, 0, 0, -1, ebon, 5);
@@ -136,7 +127,7 @@ export function makePrinter(scene) {
 
   const chamber = makeChamber(root);
   // The threaded shafts rotate in their end bearings. Nut carriers translate with the bed.
-  const shaftCenters = [[-151,139],[151,139],[0,-145]];
+  const shaftCenters = [[-151,139],[151,139],[0,-174]];
   const zScrews = shaftCenters.map(([x,z], i) => {
     const screwRotor = group(root, x, 0, z);
     cy(screwRotor, 4.0, 4.0, 342, 0, 225, 0, zinc);
@@ -158,6 +149,8 @@ export function makePrinter(scene) {
   box(bed, 283, 8, 277, 0, -6, -4, zinc, 3);
   box(bed, 271, 11, 271, 0, -12, -1, plastic, 4);
   for (const x of [-134, 134]) box(bed, 16, 12, 53, x, -16, 116, ebon, 2);
+  box(bed, 24, 5.3, 52, 0, -12.5, -150, ebon, 2);
+  makeCalibrationBoard(bed);
   const plate = mark(group(bed), 'plate');
   box(plate, 256, 1.25, 256, 0, -0.65, 0, pei, 1);
   box(plate, 84, 1.25, 11, 33, -0.65, 130, pei, 0.6);
@@ -196,61 +189,7 @@ export function makePrinter(scene) {
   const hardware = makeToolhead(gantry);
   const head = hardware.root;
 
-  const ams = mark(group(root, 0, 478, -5), 'ams');
-  box(ams, 366, 11, 259, 0, 6, 0, rubber, 5);
-  box(ams, 362, 71, 258, 0, 43, 0, plastic, 8);
-  box(ams, 350, 30, 5, 0, 59, 130.3, ebon, 3);
-  for (const x of [-176, 176]) box(ams, 5, 65, 245, x, 43, 0, edge, 2);
-  label(ams, 'Bambu Lab   AMS 2 Pro', 119, 16, 101, 72, 132.7, { size: 33, color: '#e7e9df' });
-  const lid = mark(group(ams, 0, 80, -121), 'lid');
-  const lidPositions = [], lidIndices = [];
-  for (let i = 0; i <= 44; i++) {
-    const theta = Math.PI * i / 44;
-    const y = 3 + 93 * Math.sin(theta), z = 121 - 121 * Math.cos(theta);
-    lidPositions.push(-176, y, z, 176, y, z);
-    if (i < 44) { const j = i * 2; lidIndices.push(j, j + 1, j + 2, j + 1, j + 3, j + 2); }
-  }
-  const lidGeom = new THREE.BufferGeometry();
-  lidGeom.setAttribute('position', new THREE.Float32BufferAttribute(lidPositions, 3));
-  lidGeom.setIndex(lidIndices); lidGeom.computeVertexNormals();
-  const lidShell = add(lid, lidGeom, tinted, 0, 0, 0);
-  lidShell.renderOrder = 5;
-  for (const x of [-176, 176]) {
-    const rim = [];
-    for (let i = 0; i <= 32; i++) {
-      const theta = Math.PI * i / 32;
-      rim.push(V(x, 3 + 93 * Math.sin(theta), 121 - 121 * Math.cos(theta)));
-    }
-    tube(lid, rim, 1.8, zinc, 40).mesh.renderOrder = 4;
-    const end = new THREE.Shape();
-    end.moveTo(0, 3);
-    for (const p of rim) end.lineTo(p.z, p.y);
-    end.lineTo(0, 3);
-    const cap = add(lid, new THREE.ShapeGeometry(end, 16), tinted, x, 0, 0);
-    cap.rotation.y = -Math.PI / 2; cap.renderOrder = 5;
-  }
-  for (const x of [-149, 149]) {
-    cy(ams, 4.5, 4.5, 22, x, 79, -123, zinc, 'x');
-    box(ams, 14, 14, 5, x, 73, 133, rubber, 2);
-  }
-
-  const spools = [];
-  const ledMats = [];
-  const axes = [-129, -43, 43, 129];
-  for (let i = 0; i < 4; i++) {
-    const x = axes[i];
-    box(ams, 64, 3, 172, x, 78, -5, ebon, 2);
-    box(ams, 41, 35, 34, x, 62, 114, plastic, 3);
-    box(ams, 28, 10, 11, x, 71, 131, ebon, 2);
-    cy(ams, 4, 4, 46, x, 85, 76, zinc, 'x');
-    cy(ams, 4, 4, 46, x, 85, -66, zinc, 'x');
-    cy(ams, 4.7, 4.7, 6, x, 82, 111, amber);
-    label(ams, `A${i + 1}`, 17, 7, x, 54, 133.4, { size: 33 });
-    const led = new THREE.MeshBasicMaterial({ color: 0x99bea9 });
-    box(ams, 10, 2.2, 1, x, 63.5, 137, led, 0.4);
-    ledMats.push(led);
-    spools.push(makeSpool(mark(group(ams, x, 95, -3), `slot-${i}`), 75, 66));
-  }
+  const amsModel = makeAms(root);
 
   // Rear-left mounting points as seen from behind, with the spool beside the right wall.
   const spoolMount = mark(group(root, 222, 292, -167), 'external');
@@ -261,60 +200,16 @@ export function makePrinter(scene) {
   box(spoolMount, 56, 17, 19, -20, -1, -45, plastic, 3);
   box(spoolMount, 15, 31, 17, -15, -9, -34, plastic, 3);
   cy(spoolMount, 18, 18, 99, 6, 0, 0, ebon, 'x');
-  spools.push(makeSpool(mark(group(spoolMount, 20, 0, 0), 'slot-4'), 91, 64));
-
-  const mainFeed = [V(0, 553, -129), V(70, 552, -168), V(111, 479, -229), V(119, 300, -249), V(91, 287, -214)];
-  const extFeed = [V(242, 366, -165), V(235, 378, -220), V(185, 367, -257), V(116, 279, -259), V(91, 263, -214)];
-  const midMain = [V(91, 287, -214), V(52, 312, -246), V(-18, 404, -247), V(-133, 381, -220), V(-132, 434, -160)];
-  const midAux = [V(91, 263, -214), V(14, 279, -265), V(-76, 338, -251), V(-117, 365, -220), V(-119, 433, -160)];
-  const routes = [[mainFeed, midMain], [extFeed, midAux]].map(sections => sections.map(points =>
-    ({ curve: tube(root, points, 2.35).curve, geometryEnd: points.at(-1) })));
-  tube(root, [V(50, 550, -130), V(79, 496, -204), V(65, 376, -236), V(19, 304, -215)], 2.3, rubber);
-  const harness = makeCarriageHarness(root, gantry, hardware, routes);
+  const externalSpool = makeSpool(mark(group(spoolMount, 20, 0, 0), 'slot-4'), 91, 64);
+  const rearFeed = makeRearFeed(root, rear, amsModel);
+  const harness = makeCarriageHarness(root, gantry, hardware, rearFeed.routes, amsModel.branches);
   const deposited = group(bed);
   return { root, panels, bed, plate, gantry, head, hardware, chamber, harness, axisMotion, zScrews, rearFan,
-    frontGlass, powerLight, door, screen, display, lid, spools, ledMats, deposited };
-
-}
-
-function makeSpool(parent, radius, width) {
-  const rotor = group(parent);
-  const flange = metal(0x818586, 0.66, 0.21);
-  const winding = metal(0xe4a449, 0.55, 0.09);
-  cy(rotor, radius * 0.92, radius * 0.92, width - 8, 0, 0, 0, winding, 'x', 58);
-  const loops = new THREE.InstancedMesh(new THREE.TorusGeometry(radius * 0.918, 0.53, 5, 52), winding, Math.floor((width - 8) / 1.35));
-  const matrix = new THREE.Matrix4(), q = new THREE.Quaternion().setFromAxisAngle(V(0, 1, 0), Math.PI / 2);
-  for (let k = 0; k < loops.count; k++) {
-    matrix.compose(V(k * 1.35 - (loops.count - 1) * 0.675, 0, 0), q, V(1, 1, 1));
-    loops.setMatrixAt(k, matrix);
-  }
-  rotor.add(loops);
-  for (const side of [-1, 1]) {
-    const x = side * width / 2;
-    const shape = new THREE.Shape();
-    shape.absarc(0, 0, radius, 0, Math.PI * 2);
-    const hole = new THREE.Path(); hole.absarc(0, 0, 24, 0, Math.PI * 2, true); shape.holes.push(hole);
-    for (let k = 0; k < 12; k++) {
-      const a = k * Math.PI / 6;
-      const cut = new THREE.Path();
-      cut.absarc(Math.cos(a) * radius * 0.69, Math.sin(a) * radius * 0.69, radius * 0.108, 0, Math.PI * 2, true);
-      shape.holes.push(cut);
-    }
-    const end = add(rotor, new THREE.ExtrudeGeometry(shape, { depth: 2.2, bevelEnabled: false, curveSegments: 26 }), flange, x, 0, 0);
-    end.rotation.y = Math.PI / 2;
-    add(rotor, new THREE.TorusGeometry(radius - 1, 0.9, 6, 58), zinc, x + side * 0.5, 0, 0).rotation.y = Math.PI / 2;
-    const lab = label(rotor, 'Bambu Lab', 33, 9, x + (side === 1 ? 2.3 : -0.3), -radius * 0.83, 0,
-      { side: side === 1 ? 'right' : 'left', size: 30, color: '#151918' });
-    lab.castShadow = false;
-  }
-  cy(rotor, 30, 30, width + 7, 0, 0, 0, flange, 'x');
-  cy(rotor, 18, 18, width + 8, 0, 0, 0, rubber, 'x');
-  return { parent, rotor, winding };
+    frontGlass, powerLight, door, screen, display, amsModel, externalSpool, rearFeed, deposited };
 }
 
 export function animatePrinter(model, state, carriage, dt, inspection, quality, clearFront = false) {
   model.door.rotation.y = THREE.MathUtils.damp(model.door.rotation.y, state.door ? -1.68 : 0, 8, dt);
-  model.lid.rotation.x = THREE.MathUtils.damp(model.lid.rotation.x, state.lid ? -1.55 : 0, 7, dt);
   const bedY = plateHeight(state.selector, state.position.z);
   model.bed.position.y = bedY;
   model.zScrews.forEach(screw => { screw.rotation.y = (bedY - 343) * Math.PI / 4; });
@@ -335,13 +230,7 @@ export function animatePrinter(model, state, carriage, dt, inspection, quality, 
   animateToolhead(model.hardware, state, dt, inspection, targets);
   animateChamber(model.chamber, state, targets, dt);
   animateCarriageHarness(model.harness, model.head.position.x, model.gantry.position.z, GANTRY_Y, state, quality);
-  for (let i = 0; i < model.spools.length; i++) {
-    const spool = state.spools[i], mesh = model.spools[i];
-    mesh.parent.visible = spool.present;
-    mesh.rotor.rotation.x = spool.rotation;
-    mesh.winding.color.set(spool.color);
-    mesh.winding.roughness = ['Gloss', 'Silk', 'Metallic'].includes(spool.finish) ? 0.3 : 0.65;
-    if (i < 4) model.ledMats[i].color.set(!state.power || !spool.present ? 0x41494b :
-      state.feed?.slot === i || state.loaded[0] === i ? 0x64f2a5 : state.dryer.time ? 0xf0b26a : 0x99a8a2);
-  }
+  animateAms(model.amsModel, state, dt);
+  updateSpool(model.externalSpool, state.spools[4]);
+  animateRearFeed(model.rearFeed, state, dt);
 }
