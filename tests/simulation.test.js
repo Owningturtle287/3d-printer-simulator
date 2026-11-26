@@ -218,7 +218,7 @@ test('the complete Benchy and dual-nozzle demo run from job preparation to cooli
     p.start(job, mapping);
     until(p, () => ['complete', 'fault'].includes(p.state.status));
     assert.equal(p.state.status, 'complete', p.state.lastError?.message);
-    assert.equal(p.state.path.length, job.entries.filter(entry => entry.extrusion && entry.distance).length);
+    assert.equal(p.state.path.length, [...job.entries].filter(entry => entry.extrusion && entry.distance).length);
     assert.equal(p.state.history.length, 1);
     if (mapping[1] === 4) assert.ok(p.state.path.some(bead => bead.color === p.state.spools[4].color));
   }

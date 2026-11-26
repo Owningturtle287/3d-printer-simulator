@@ -1,12 +1,12 @@
 import { X2D, area, reachable, duration } from './spec.js';
+import { Toolpath } from './toolpath.js';
 
-export const MAX_MOVES = 650_000;
 const coordinate = (p, axis, length) => p + axis * length;
 const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 const initial = { x: 0, y: 0, z: 0 };
 
 export function parseGcode(source, { name = 'Imported print', model = '', thumbnail, plate } = {}) {
-  const entries = [];
+  const entries = new Toolpath();
   let p = { ...initial }, off = { ...initial }, e = 0, eOffset = 0, feed = 1800;
   let xyzAbsolute = true, eAbsolute = true, scale = 1, tool = 0;
   let layer = 0, layerZ = -1, layerHeight = 0.2, width = 0.44, retracted = 0, seenExtrusion = false;
@@ -21,10 +21,6 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
   const firstLayerMarker = bambu && !firmwareMarkers && /;\s*(?:CHANGE_LAYER|LAYER_CHANGE)\s*$/im.test(source);
   let ignore = false, changing = false, enteredBody = !firstLayerMarker;
 
-  function push(entry) {
-    if (entries.length >= MAX_MOVES) throw new Error('This plate exceeds the simulator’s 650,000-command limit.');
-    entries.push(entry);
-  }
   function move(to, extrusion, line) {
     const distance = dist(p, to);
     if (distance <= 1e-6 && extrusion <= 1e-6) { p = to; return; }
@@ -33,9 +29,9 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
       if (!reachable(to)) throw new Error(`Line ${line}: extrusion is outside the 256 × 256 × 260 mm envelope.`);
       if (!seenExtrusion) {
         seenExtrusion = true;
-        for (const item of pending.filter(item => item.kind !== 'move').slice(-180)) push(item);
+        for (const item of pending.filter(item => item.kind !== 'move').slice(-180)) entries.push(item);
         if (!reachable(p)) throw new Error(`Line ${line}: the first extrusion starts outside the build volume.`);
-        if (distance > 1e-6) push({ ...entry, from: p, to: p, distance: 0, extrusion: 0, approach: true });
+        if (distance > 1e-6) entries.push({ ...entry, from: p, to: p, distance: 0, extrusion: 0, approach: true });
       }
       if (declaredLayer === null && to.z > layerZ + 0.025) {
         layerHeight = layerZ < 0 ? Math.min(0.4, Math.max(0.08, to.z)) : Math.min(0.6, to.z - layerZ);
@@ -62,7 +58,7 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
     if (seenExtrusion) {
       if (!reachable(to)) throw new Error(`Line ${line}: travel is outside the simulation envelope.`);
       estimated += duration(distance, Math.min(entry.feed, X2D.travel), X2D.main.acceleration);
-      push(entry);
+      entries.push(entry);
     } else {
       pending.push(entry);
       if (pending.length > 180) pending.shift();
@@ -70,10 +66,16 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
     p = to;
   }
 
-  const lines = source.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const [raw, ...comments] = lines[i].split(';');
-    const comment = comments.join(';').trim();
+  let startOfLine = 0, line = 0;
+  while (startOfLine < source.length) {
+    const newline = source.indexOf('\n', startOfLine);
+    const endOfLine = newline === -1 ? source.length : newline;
+    const text = source.slice(startOfLine, endOfLine);
+    startOfLine = endOfLine + 1;
+    line++;
+    const delimiter = text.indexOf(';');
+    const raw = delimiter === -1 ? text : text.slice(0, delimiter);
+    const comment = delimiter === -1 ? '' : text.slice(delimiter + 1).trim();
     if (/^MACHINE_(?:START|END)_GCODE_START\b/i.test(comment)) { ignore = true; continue; }
     if (/^MACHINE_(?:START|END)_GCODE_END\b/i.test(comment)) { ignore = false; continue; }
     if (/^(?:END(?:_PRINT| GCODE|_OF_PRINT)\b|=+\s*X2D end gcode)/i.test(comment)) break;
@@ -131,21 +133,21 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
     }
     if (!enteredBody) {
       if (['M104', 'M140', 'M141'].includes(code) && args.S > 0 && pending.length < 180)
-        pending.push({ kind: 'control', code, args, tool, line: i + 1 });
+        pending.push({ kind: 'control', code, args, tool, line });
       continue;
     }
     if (['M104', 'M109', 'M140', 'M190', 'M141', 'M191', 'M106', 'M107', 'G4', 'M0', 'M1', 'M25', 'M400'].includes(code)) {
       if (code === 'M400' && args.U !== 1) continue;
-      const entry = { kind: 'control', code, args, tool, line: i + 1 };
+      const entry = { kind: 'control', code, args, tool, line };
       if (seenExtrusion) {
-        push(entry);
+        entries.push(entry);
         if (code === 'G4') estimated += Math.min(600, args.S ?? (args.P || 0) / 1000);
       } else pending.push(entry);
       continue;
     }
     if (/^(?:G53|G5|G17|G18|G19|G29|G28|G54|G55|G56|G57|G58|G59|M200|M218)$/.test(code)) {
       if (code === 'G17' || ['G28', 'G29'].includes(code) && !seenExtrusion || code === 'M200' && args.D === 0) continue;
-      throw new Error(`Line ${i + 1}: ${code} is unsupported in executable toolpaths.`);
+      throw new Error(`Line ${line}: ${code} is unsupported in executable toolpaths.`);
     }
     if (!['G0', 'G1', 'G2', 'G3'].includes(code)) {
       if (/^(?:M62[01]|M10[0-9]+|M9[0-9]+|G[0-9]+\.\d+)$/.test(code)) skipped++;
@@ -162,9 +164,9 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
     const recovered = Math.min(retracted, Math.max(0, deltaE));
     retracted -= recovered;
     const deposit = Math.max(0, deltaE - recovered);
-    if (code === 'G0' || code === 'G1') { move(target, deposit, i + 1); continue; }
+    if (code === 'G0' || code === 'G1') { move(target, deposit, line); continue; }
     if (args.R !== undefined || (args.I === undefined && args.J === undefined)) {
-      throw new Error(`Line ${i + 1}: use XY arcs with I/J offsets or export linear G-code.`);
+      throw new Error(`Line ${line}: use XY arcs with I/J offsets or export linear G-code.`);
     }
     const start = p;
     const cx = coordinate(start.x, args.I || 0, scale), cy = coordinate(start.y, args.J || 0, scale);
@@ -175,11 +177,11 @@ export function parseGcode(source, { name = 'Imported print', model = '', thumbn
     if (code === 'G3' && sweep <= 1e-8) sweep += Math.PI * 2;
     const count = Math.max(1, Math.ceil(Math.abs(sweep * radius) / 0.6));
     if (!radius || count > 10000 || Math.abs(Math.hypot(target.x - cx, target.y - cy) - radius) > 0.25)
-      throw new Error(`Line ${i + 1}: invalid XY arc.`);
+      throw new Error(`Line ${line}: invalid XY arc.`);
     for (let n = 1; n <= count; n++) {
       const fraction = n / count, angle = a + sweep * fraction;
       move(n === count ? target : { x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius,
-        z: start.z + (target.z - start.z) * fraction }, deposit / count, i + 1);
+        z: start.z + (target.z - start.z) * fraction }, deposit / count, line);
     }
   }
   if (!totalExtrusion) throw new Error('No printable XY extrusion moves were found.');

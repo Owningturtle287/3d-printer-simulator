@@ -21,19 +21,28 @@ const faces = [
   0, 6, 4, 0, 4, 2, 1, 3, 5, 1, 5, 7,
 ];
 
+function makeIndices(maximum) {
+  const indices = new Uint16Array(maximum * faces.length);
+  for (let i = 0; i < maximum; i++) {
+    faces.forEach((vertex, j) => { indices[i * faces.length + j] = i * 8 + vertex; });
+  }
+  return new THREE.BufferAttribute(indices, 1);
+}
+
+const sectionIndices = makeIndices(capacity);
+const liveIndices = makeIndices(1);
+
 class BeadMesh {
   constructor(parent, maximum, finish) {
     const geometry = new THREE.BufferGeometry();
     this.count = 0;
     this.position = new Float32Array(maximum * 24);
-    this.normal = new Float32Array(maximum * 24);
-    this.color = new Float32Array(maximum * 24);
-    const indices = new Uint16Array(maximum * faces.length);
-    for (let i = 0; i < maximum; i++) faces.forEach((v, j) => { indices[i * faces.length + j] = i * 8 + v; });
+    this.normal = new Int8Array(maximum * 24);
+    this.color = new Uint16Array(maximum * 24);
     geometry.setAttribute('position', new THREE.BufferAttribute(this.position, 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(this.normal, 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.setAttribute('color', new THREE.BufferAttribute(this.color, 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(this.normal, 3, true).setUsage(THREE.DynamicDrawUsage));
+    geometry.setAttribute('color', new THREE.BufferAttribute(this.color, 3, true).setUsage(THREE.DynamicDrawUsage));
+    geometry.setIndex(maximum === capacity ? sectionIndices : liveIndices);
     geometry.setDrawRange(0, 0);
     this.mesh = new THREE.Mesh(geometry, materialFor(finish));
     this.mesh.frustumCulled = false;
@@ -48,18 +57,21 @@ class BeadMesh {
     const widthOffset = width * 0.5;
     const variation = finish === 'Carbon fiber' ? 0.03 : 0.009;
     color.set(bead.color).multiplyScalar(0.96 + Math.sin(layer * 2.57) * variation);
+    const red = Math.round(color.r * 65535), green = Math.round(color.g * 65535), blue = Math.round(color.b * 65535);
     const positions = [from, to];
     for (let pair = 0; pair < 4; pair++) {
       const side = pair === 0 || pair === 3 ? -1 : 1;
       const top = pair < 2;
-      const nx = sidewaysX * side * 0.64, nz = sidewaysZ * side * 0.64;
-      const ny = top ? 0.77 : -0.77;
+      const nx = Math.round(sidewaysX * side * 0.64 * 127), nz = Math.round(sidewaysZ * side * 0.64 * 127);
+      const ny = top ? 98 : -98;
       for (let end = 0; end < 2; end++) {
         const p = positions[end], at = index * 24 + (pair * 2 + end) * 3;
         const y = top ? p.z : Math.max(0, p.z - height);
-        this.position.set([p.x - 128 + sidewaysX * side * widthOffset, y, 128 - p.y + sidewaysZ * side * widthOffset], at);
-        this.normal.set([nx, ny, nz], at);
-        this.color.set([color.r, color.g, color.b], at);
+        this.position[at] = p.x - 128 + sidewaysX * side * widthOffset;
+        this.position[at + 1] = y;
+        this.position[at + 2] = 128 - p.y + sidewaysZ * side * widthOffset;
+        this.normal[at] = nx; this.normal[at + 1] = ny; this.normal[at + 2] = nz;
+        this.color[at] = red; this.color[at + 1] = green; this.color[at + 2] = blue;
       }
     }
     this.count = Math.max(this.count, index + 1);
@@ -99,7 +111,7 @@ export class ExtrusionView {
     for (const section of this.pending) section.upload();
     this.pending.clear();
     const job = state.job;
-    const entry = job?.file.entries[job.index];
+    const entry = job?.file.entries.at(job.index);
     const segment = job?.segment;
     this.live.mesh.visible = !!(entry?.extrusion && entry.distance > 0 && segment?.deposited);
     if (!this.live.mesh.visible) return;

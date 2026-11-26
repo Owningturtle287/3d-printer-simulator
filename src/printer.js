@@ -15,14 +15,16 @@ const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z);
 export class VirtualPrinter {
   #listeners = new Set();
   #surface = new Float32Array(173 * 173);
+  #recordDeposits;
 
-  constructor(config = {}) {
+  constructor(config = {}, { recordDeposits = true } = {}) {
+    this.#recordDeposits = recordDeposits;
     this.state = {
       power: true, status: 'booting', message: 'Starting printer…', bootTime: 1.4, phase: '', tempo: 1,
       position: position(142, 80, 118), nozzle: 0, selector: 0, lights: config.lights ?? true,
       door: false, lid: false, plate: true, homed: false, fan: 0, fanOverrides: { auxiliary: null, exhaust: null }, motionSpeed: 0,
       spools: defaultSpools().map((fallback, i) => ({ ...fallback, ...config.spools?.[i], rotation: 0 })),
-      loaded: [null, null], feed: null, service: null, job: null, path: [],
+      loaded: [null, null], feed: null, service: null, job: null, path: [], depositedCount: 0,
       temperatures: Object.fromEntries(Object.keys(THERMAL).map(key => [key, { current: ROOM, target: 0 }])),
       dryer: { time: 0, total: 0, target: 0, temperature: ROOM, humidity: config.humidity ?? 28, adapter: !!config.adapter },
       backup: config.backup ?? true, lastError: null, history: Array.isArray(config.history) ? config.history.slice(0, 30) : [],
@@ -79,7 +81,7 @@ export class VirtualPrinter {
   setLid() { this.state.lid = !this.state.lid; this.#emit('hardware'); }
   setPlate() {
     const s = this.state;
-    if (this.busy || !s.door || s.temperatures.bed.current > 50 || s.path.length)
+    if (this.busy || !s.door || s.temperatures.bed.current > 50 || s.depositedCount)
       throw new Error('Open the door, cool the bed below 50 °C, and clear the bed before changing the plate.');
     s.plate = !s.plate;
     this.#emit('hardware');
@@ -89,6 +91,7 @@ export class VirtualPrinter {
     if (this.busy || !s.door || s.temperatures.bed.current > 55)
       throw new Error('Wait for the bed to cool below 55 °C and open the door before removing the print.');
     s.path = [];
+    s.depositedCount = 0;
     this.#surface.fill(0);
     if (s.status === 'complete') s.status = 'idle';
     s.job = null;
@@ -124,7 +127,7 @@ export class VirtualPrinter {
     if (!['x', 'y', 'z'].includes(axis) || !Number.isFinite(delta)) throw new Error('Invalid axis movement.');
     const to = { ...s.position, [axis]: s.position[axis] + delta };
     if (!reachable(to, s.nozzle === 1)) throw new Error('That move would exceed nozzle or bed travel.');
-    if (s.path.length && to.z < (s.job?.file.bounds.z[1] || 0) + 2) throw new Error('Lower the bed for print clearance before jogging.');
+    if (s.depositedCount && to.z < (s.job?.file.bounds.z[1] || 0) + 2) throw new Error('Lower the bed for print clearance before jogging.');
     this.#service('Moving axes', Math.max(0.2, dist(s.position, to) / 60), { from: { ...s.position }, to });
   }
   selectNozzle(nozzle) {
@@ -201,7 +204,7 @@ export class VirtualPrinter {
   start(file, mapping, { calibrate = true } = {}) {
     this.#requireIdle();
     const s = this.state;
-    if (!s.plate || s.path.length) throw new Error('Install an empty build plate before starting.');
+    if (!s.plate || s.depositedCount) throw new Error('Install an empty build plate before starting.');
     if (!file?.entries?.length || file.error) throw new Error('Choose a printable plate.');
     const tools = Object.keys(file.materials);
     const safeMapping = {};
@@ -266,9 +269,9 @@ export class VirtualPrinter {
     if (!this.active) return;
     const { segment, file, index, mapping, resumeAt } = s.job;
     if (segment?.deposited) {
-      const entry = file.entries[index], spool = s.spools[mapping[entry.tool]], to = resumeAt || s.position;
+      const entry = file.entries.at(index), spool = s.spools[mapping[entry.tool]], to = resumeAt || s.position;
       const bead = { ...entry, to, color: spool.color, finish: spool.finish };
-      s.path.push(bead); this.#trackSurface(bead.from, bead.to, true); this.#emit('extrude', bead);
+      this.#deposit(bead);
     }
     s.job.segment = null; s.service = null; s.feed = null; s.selector = s.nozzle;
     s.status = 'idle'; s.phase = ''; s.message = reason; s.motionSpeed = 0;
@@ -448,7 +451,7 @@ export class VirtualPrinter {
       if (job.wait > 0) {
         const step = Math.min(job.wait, budget); job.wait -= step; budget -= step; continue;
       }
-      const entry = job.file.entries[job.index];
+      const entry = job.file.entries.at(job.index);
       if (!entry) {
         s.status = 'complete'; s.phase = ''; s.motionSpeed = 0; s.message = 'Print complete'; s.fan = 0;
         s.history.unshift({ name: job.file.name, date: new Date().toISOString(), seconds: job.elapsed, grams: job.used });
@@ -512,13 +515,17 @@ export class VirtualPrinter {
         if (move.deposited) {
           const spool = s.spools[slot];
           const bead = { from: entry.from, to: entry.to, width: entry.width, height: entry.height, color: spool.color, finish: spool.finish, layer: entry.layer };
-          s.path.push(bead);
-          this.#trackSurface(bead.from, bead.to, true);
-          this.#emit('extrude', bead);
+          this.#deposit(bead);
         }
         job.index++; job.segment = null;
       }
     }
+  }
+  #deposit(bead) {
+    this.state.depositedCount++;
+    if (this.#recordDeposits) this.state.path.push(bead);
+    this.#trackSurface(bead.from, bead.to, true);
+    this.#emit('extrude', bead);
   }
   #trackSurface(from, to, deposit) {
     const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / GRID));

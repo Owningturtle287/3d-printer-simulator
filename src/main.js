@@ -4,6 +4,7 @@ import { createView } from './view.js';
 import { createAudio } from './audio.js';
 import { listFiles, saveFile, deleteFile, loadPreferences, savePreferences } from './storage.js';
 import { DEMOS, loadDemo } from './demos.js';
+import { Toolpath } from './toolpath.js';
 import { MATERIALS, SPEEDS, slotLabel, compatible, grams, X2D } from './spec.js';
 import { button, icon, escape, time, layout } from './ui.js';
 
@@ -12,7 +13,7 @@ const $$ = selector => document.querySelectorAll(selector);
 $('#app').innerHTML = layout();
 
 const settings = loadPreferences();
-const printer = new VirtualPrinter(settings.printer);
+const printer = new VirtualPrinter(settings.printer, { recordDeposits: false });
 const state = printer.state;
 const stage = $('#stage'), surface = $('.printer-display'), dialog = $('#modal');
 const audio = createAudio(printer);
@@ -20,7 +21,7 @@ let quality = ['high', 'medium', 'low'].includes(settings.quality) ? settings.qu
   matchMedia('(pointer: coarse)').matches ? 'medium' : 'high';
 let sound = false, cutaway = false, focused = false, currentView = 'studio';
 let tab = 'printer', page = 'home', thermalPage = true, selectedSlot = 0, batch = [], batchIndex = 0;
-let mapping = {}, pending = false, files = [], sourceJob = null, messageTimer, renderingError = false;
+let mapping = {}, pending = false, importController = null, files = [], sourceJob = null, messageTimer, renderingError = false;
 
 const zones = { left: 'Left nozzle', right: 'Right nozzle', bed: 'Build plate', chamber: 'Chamber' };
 const views = { studio: 'Studio', front: 'Front', rear: 'Rear', left: 'Left side', right: 'Right side', top: 'Top',
@@ -111,7 +112,7 @@ function progressCard() {
     <div class="row" data-print-buttons>${jobButtons(false)}</div></div>`;
 }
 function jobButtons(screen) {
-  if (!printer.active) return state.path.length ? button('Remove print', 'remove', 'layers', 'secondary') : '';
+  if (!printer.active) return state.depositedCount ? button('Remove print', 'remove', 'layers', 'secondary') : '';
   const stopped = ['paused', 'fault'].includes(state.status);
   return button(stopped ? 'Resume' : 'Pause', stopped ? 'resume' : 'pause', stopped ? 'play' : 'pause', screen ? 'touch-strong' : 'secondary') +
     button('Cancel', 'cancel', 'stop', screen ? '' : 'secondary');
@@ -122,13 +123,13 @@ function renderInspector() {
   if (tab === 'printer') html = heading('Printer', 'Bambu Lab X2D Combo') + `
     <section class="card live-card"><div class="card-title">${icon('cube')}<h2>Machine status</h2></div>
       <div class="machine-line"><span class="live-dot"></span><strong data-text="status">Ready</strong><span data-text="phase">Idle</span></div>
-      ${state.job || state.path.length ? progressCard() : ''}
+      ${state.job || state.depositedCount ? progressCard() : ''}
       ${button('Open touchscreen', 'screen', 'monitor', 'secondary wide')}</section>
     <section class="card"><div class="card-title">${icon('temp')}<h2>Temperature</h2></div>${temperatureCard()}</section>
     <section class="card quick-card"><div class="card-title">${icon('sliders')}<h2>Quick controls</h2></div>
       <div class="quick-grid">${button('Home axes', 'home', 'home')}${button('Chamber light', 'lamp', 'light')}
       ${button('Power', 'power', 'power')}${button('Camera', 'view:camera', 'lens')}</div></section>
-    ${!state.job && !state.path.length ? `<button class="feature" data-action="demo:benchy"><span class="feature-icon">${icon('play')}</span><span><strong>Print 3DBenchy</strong><small>Ready-to-print example</small></span>${icon('arrow')}</button>` : ''}`;
+    ${!state.job && !state.depositedCount ? `<button class="feature" data-action="demo:benchy"><span class="feature-icon">${icon('play')}</span><span><strong>Print 3DBenchy</strong><small>Ready-to-print example</small></span>${icon('arrow')}</button>` : ''}`;
   if (tab === 'filament') html = heading('Filament', 'AMS 2 Pro and external spool') + `
     <section class="card"><div class="card-title">${icon('spool')}<h2>AMS 2 Pro</h2>${button('', 'view:ams', 'focus', 'icon-button', 'Focus AMS')}</div>
       <div class="spool-list">${state.spools.slice(0, 4).map((s, i) => spoolRow(s, i)).join('')}</div>
@@ -184,7 +185,7 @@ function renderScreen() {
   if (page === 'home') content = sectionTitle('Overview', `
     <section class="touch-status"><span class="live-dot"></span><div><strong data-text="status">Ready</strong><small data-text="message"></small></div>
       ${button('', 'page:messages', 'info', '', 'Messages')}</section>
-    ${state.job || state.path.length ? progressCard() : `<div class="touch-tiles">${button('Print files', 'page:files', 'folder')}
+    ${state.job || state.depositedCount ? progressCard() : `<div class="touch-tiles">${button('Print files', 'page:files', 'folder')}
       ${button('Nozzle &amp; extruder', 'page:nozzles', 'temp')}${button('Filament', 'page:filament', 'spool')}${button('Chamber light', 'lamp', 'light')}</div>`}`);
   if (page === 'controls') content = sectionTitle('Printer controls', `
     <div class="touch-row">${button('Temperature', 'thermal', 'temp', thermalPage ? 'touch-strong' : '')}${button('Move axes', 'motion', 'sliders', thermalPage ? '' : 'touch-strong')}
@@ -246,7 +247,8 @@ function moveForm() {
 }
 
 function prepare() {
-  if (pending) return '<p class="empty-state" role="status">Reading toolpaths…</p>';
+  if (pending) return `<p class="empty-state" role="status">Reading toolpaths…</p>
+    ${importController ? button('Cancel import', 'cancel-import', 'x', 'secondary') : ''}`;
   const job = batch[batchIndex];
   if (!job) return '<p class="empty-state">Choose a file to prepare.</p>';
   const plates = batch.length > 1 ? `<label class="inline-label">Plate<select data-change="plate-job">${batch.map((job, i) =>
@@ -282,7 +284,7 @@ function paintPreview() {
   const stride = Math.max(1, Math.ceil(job.entries.length / 35000));
   ctx.lineWidth = 1.07;
   for (let i = 0; i < job.entries.length; i += stride) {
-    const move = job.entries[i];
+    const move = job.entries.at(i);
     if (!(move.extrusion > 0 && move.distance)) continue;
     ctx.strokeStyle = state.spools[mapping[move.tool]]?.color || '#9ad6b0';
     ctx.globalAlpha = 0.44 + 0.4 * (move.layer / Math.max(1, job.layers));
@@ -306,38 +308,56 @@ function configureMapping() {
 async function selectJob(loader, source) {
   if (pending) return;
   pending = true;
+  importController = source === 'import' || source === 'local' ? new AbortController() : null;
   sourceJob = source;
   openPage('prepare');
   try {
-    batch = await loader();
+    batch = await loader(importController?.signal);
     batchIndex = Math.max(0, batch.findIndex(job => !job.error));
     configureMapping();
   } catch (error) {
-    batch = [{ error: error.message }];
+    batch = [];
     batchIndex = 0;
-    notify(error.message, true);
-  } finally { pending = false; renderScreen(); }
+    if (error.name === 'AbortError') {
+      if (page === 'prepare') page = 'files';
+    } else {
+      batch = [{ error: error.message }];
+      notify(error.message, true);
+    }
+  } finally {
+    pending = false;
+    importController = null;
+    renderScreen();
+  }
 }
-function readFile(file) {
-  return file.arrayBuffer().then(buffer => new Promise((resolve, reject) => {
+async function readFile(file, signal) {
+  const buffer = await file.arrayBuffer();
+  signal.throwIfAborted();
+  const plates = await new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./files-worker.js', import.meta.url), { type: 'module' });
-    const timer = setTimeout(() => finish({ error: 'Processing exceeded 60 seconds. Try a smaller file or sliced G-code.' }), 60000);
-    function finish(data) {
-      clearTimeout(timer); worker.terminate();
+    function close() {
+      signal.removeEventListener('abort', cancel);
+      worker.terminate();
+    }
+    function cancel() { close(); reject(signal.reason); }
+    signal.addEventListener('abort', cancel, { once: true });
+    worker.onmessage = ({ data }) => {
+      close();
       if (data.error) reject(new Error(data.error));
       else resolve(data.plates);
-    }
-    worker.onmessage = event => finish(event.data);
-    worker.onerror = () => finish({ error: 'The print file reader could not be started.' });
+    };
+    worker.onerror = () => { close(); reject(new Error('The print file reader could not be started.')); };
     worker.postMessage({ name: file.name, buffer }, [buffer]);
-  }));
+  });
+  for (const plate of plates) if (plate.entries) plate.entries = new Toolpath(plate.entries);
+  return plates;
 }
 async function importFiles(uploads) {
   if (!uploads.length || pending) return;
   const activeFile = uploads[0];
   if (activeFile.size > 64 * 1024 ** 2) { notify('Choose a print file under 64 MB.', true); return; }
-  await selectJob(async () => {
-    const plates = await readFile(activeFile);
+  await selectJob(async signal => {
+    const plates = await readFile(activeFile, signal);
     const stored = { id: crypto.randomUUID(), name: activeFile.name, blob: activeFile, date: Date.now() };
     files = [stored, ...files];
     try { await saveFile(stored); }
@@ -425,10 +445,11 @@ async function runAction(command) {
     case 'settings': openSettings(); return;
     case 'close-modal': dialog.close(); return;
     case 'upload': $('#import').click(); return;
+    case 'cancel-import': importController?.abort(); return;
     case 'demo': await selectJob(async () => [await loadDemo(arg)], arg); return;
     case 'local': {
       const file = files.find(f => f.id === arg);
-      if (file) await selectJob(() => readFile(file.blob), 'local');
+      if (file) await selectJob(signal => readFile(file.blob, signal), 'local');
       return;
     }
     case 'delete-file':

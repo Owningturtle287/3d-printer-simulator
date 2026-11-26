@@ -9,15 +9,16 @@ import { parseGcode } from '../src/gcode.js';
 import { sliceTriangles } from '../src/slicing.js';
 
 function covered(job, x, y, z) {
-  return job.entries.some(move => {
-    if (!move.extrusion || Math.abs(move.to.z - z) > 0.001) return false;
+  for (const move of job.entries) {
+    if (!move.extrusion || Math.abs(move.to.z - z) > 0.001) continue;
     const dx = move.to.x - move.from.x, dy = move.to.y - move.from.y;
     const lengthSquared = dx * dx + dy * dy;
-    if (!lengthSquared) return false;
+    if (!lengthSquared) continue;
     const projection = ((x - move.from.x) * dx + (y - move.from.y) * dy) / lengthSquared;
     const at = Math.max(0, Math.min(1, projection));
-    return Math.hypot(x - (move.from.x + at * dx), y - (move.from.y + at * dy)) <= move.width / 2;
-  });
+    if (Math.hypot(x - (move.from.x + at * dx), y - (move.from.y + at * dy)) <= move.width / 2) return true;
+  }
+  return false;
 }
 
 test('Benchy deposits a solid deck, cabin floor and roof while preserving the chimney bore', () => {

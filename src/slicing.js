@@ -12,10 +12,11 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
     max[axis] = Math.max(max[axis], vertex[axis]);
   }
   const size = max.map((v, i) => v - min[i]);
-  if (size[0] > 246 || size[1] > 246 || size[2] > 260 || size[2] < 0.08) {
+  const { x, y, z } = X2D.main;
+  if (size[0] > x + 0.001 || size[1] > y + 0.001 || size[2] > z + 0.001 || size[2] < 0.08) {
     throw new Error('The mesh cannot be centered and sliced within the supported X2D build volume.');
   }
-  const origin = [(256 - size[0]) / 2 - min[0], (256 - size[1]) / 2 - min[1]];
+  const origin = [(x - size[0]) / 2 - min[0], (y - size[1]) / 2 - min[1]];
   const layers = Math.ceil(size[2] / layer);
   const slices = Array.from({ length: layers }, () => []);
   for (const triangle of triangles) {
@@ -56,7 +57,6 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
       const filament = Math.hypot(x - a, y - b) * width * layer / area;
       if (filament >= 0.00005) lines.push(`G1 ${xy(points[i])} E${filament.toFixed(4)} F${speed}`);
     }
-    if (lines.length > 630_000) throw new Error('The sliced model exceeds the simulator’s toolpath limit.');
   }
   for (let i = 0; i < slices.length; i++) {
     profiles.delete(i - SKIN_LAYERS - 1);
@@ -66,7 +66,7 @@ export function sliceTriangles(triangles, { layer = 0.24, bed = 55, nozzle = 220
     if (!acceptLegacySeams && contours.some(chain => key(chain[0]) !== key(chain.at(-1)))) {
       throw new Error(`Open or non-manifold mesh at layer ${i + 1}. Repair the 3MF or import a pre-sliced file.`);
     }
-    lines.push(`;LAYER:${i}`, `G0 Z${format(Math.min((i + 1) * layer, 260))} F1200`);
+    lines.push(`;LAYER:${i}`, `G0 Z${format(Math.min((i + 1) * layer, z))} F1200`);
     for (const contour of contours) path(simplify(contour, key(contour[0]) === key(contour.at(-1))), i < 2 ? 1500 : 3300);
     const axis = i % 2;
     const neighbors = [];
