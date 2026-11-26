@@ -566,7 +566,7 @@ function frame(now) {
   const dt = Math.max(0, (now - frameAt) / 1000);
   frameAt = now;
   printer.tick(dt);
-  view?.render(now, Math.min(dt, 0.12));
+  view?.render(now, Math.min(dt, 0.3));
   if (now - telemetryAt > 130) { updateTelemetry(); audio.update(); telemetryAt = now; }
   requestAnimationFrame(frame);
 }

@@ -103,7 +103,7 @@ export function createView(container, surface, printer, onAction, quality = 'hig
   let dimensions = { width: 1, height: 1 };
   function setQuality(value) {
     quality = value;
-    const pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 1.65 : quality === 'medium' ? 1.25 : 1);
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, quality === 'high' ? 1.65 : quality === 'medium' ? 1.25 : .75);
     renderer.setPixelRatio(pixelRatio);
     renderer.shadowMap.enabled = quality !== 'low';
     key.castShadow = quality !== 'low';
@@ -129,6 +129,9 @@ export function createView(container, surface, printer, onAction, quality = 'hig
       position = [gp.x + 39, gp.y - 29, gp.z + 181];
     }
     const p = v(position), t = v(target);
+    if (name === 'ams' && camera.aspect < 1.08) {
+      p.sub(t).multiplyScalar(1 + (1.08 - camera.aspect) * 1.28).add(t);
+    }
     if (camera.aspect < 1.08 && ['studio', 'front', 'rear', 'left', 'right', 'top'].includes(name)) {
       p.sub(t).multiplyScalar(1 + Math.max(0, 1.08 - camera.aspect) * 0.45).add(t);
     }
